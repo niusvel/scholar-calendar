@@ -199,3 +199,57 @@ def test_a_week_without_capacity_cannot_borrow_sessions_from_another_week():
     )
     with pytest.raises(ScheduleError):
         solve(planning)
+
+
+def test_parallel_rule_allows_same_subject_in_different_rooms():
+    from collections import defaultdict
+
+    planning = PlanningInput(
+        weeks=1,
+        subjects=(Subject("A", 1), Subject("B", 1)),
+        teachers=(Teacher("Ana"), Teacher("Luis")),
+        classrooms=(Classroom("1"), Classroom("2")),
+        slots=build_slots(weeks=1, days=1, daily_periods=((time(8), time(9)), (time(9), time(10)))),
+        teacher_subjects={"Ana": frozenset({"A", "B"}), "Luis": frozenset({"A", "B"})},
+        teacher_classrooms={},
+        forbidden_parallel=frozenset({frozenset({"A", "B"})}),
+    )
+    schedule = solve(planning)
+    by_period = defaultdict(list)
+    for lesson in schedule.lessons:
+        by_period[lesson.period].append(lesson)
+    assert len(schedule.lessons) == 4
+    assert all(
+        len(lessons) == 2 and len({item.subject for item in lessons}) == 1
+        for lessons in by_period.values()
+    )
+
+
+def test_double_periods_accept_slots_stored_out_of_order():
+    slots = build_slots(weeks=1, days=2, daily_periods=((time(8), time(9)), (time(9), time(10))))
+    planning = PlanningInput(
+        weeks=1,
+        subjects=(Subject("A", 4, double_period=True),),
+        teachers=(Teacher("Ana"),),
+        classrooms=(Classroom("1"),),
+        slots=tuple(reversed(slots)),
+        teacher_subjects={"Ana": frozenset({"A"})},
+        teacher_classrooms={},
+    )
+    assert len(solve(planning).lessons) == 4
+
+
+def test_timeout_is_not_reported_as_proven_infeasibility():
+    from unittest.mock import patch
+
+    import pytest
+    from ortools.sat.python import cp_model
+
+    from scholar_calendar.config import load_planning
+    from scholar_calendar.solver import ScheduleError
+
+    with (
+        patch.object(cp_model.CpSolver, "Solve", return_value=cp_model.UNKNOWN),
+        pytest.raises(ScheduleError, match="no se ha demostrado"),
+    ):
+        solve(load_planning("examples/cycle.json"))

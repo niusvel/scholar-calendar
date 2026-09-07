@@ -1,3 +1,5 @@
+"""Tk application controller; edited configuration and generated snapshots stay separate."""
+
 from __future__ import annotations
 
 import tkinter as tk
@@ -9,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .clock import DEFAULT_CLASS_START, minutes_since_midnight, parse_optional_time
 from .configuration_overview import ConfigurationOverview
+from .defaults import default_planning
 from .models import Classroom, PlanningInput, Subject, Teacher, build_daily_periods, build_slots
 from .project_file import CalendarProject, load_project, save_project
 from .restriction_note import RestrictionNote
@@ -17,6 +20,7 @@ from .solver import Schedule, ScheduleError, solve
 from .subject_details import subject_restrictions
 from .theme import INK, PALE_TEAL, PAPER, TEAL, configure_styles
 from .timeline import DAY_NAMES, daily_rows
+from .validation import validate_planning
 
 
 class CalendarApp(tk.Tk):
@@ -41,7 +45,6 @@ class CalendarApp(tk.Tk):
         self.teacher_classrooms: dict[str, set[str]] = {}
         self.course_var = tk.StringVar()
         self.weeks_var = tk.IntVar(value=2)
-        self.classrooms_var = tk.StringVar()
         self.classroom_name_var = tk.StringVar()
         self.day_count_vars = {day: tk.IntVar(value=6) for day in range(1, 7)}
         self.saturday_vars: dict[int, tk.BooleanVar] = {}
@@ -81,10 +84,9 @@ class CalendarApp(tk.Tk):
         configure_styles(self)
         self._build_ui()
         self.bind("<Escape>", lambda _event: self._select_schedule_subject(None))
+        self._set_planning(self._blank_planning())
         if config_path:
             self._load(Path(config_path))
-        else:
-            self._set_planning(self._blank_planning())
         for variable in self._clock_variables() + tuple(self.day_count_vars.values()):
             variable.trace_add("write", self._queue_clock_preview)
         self.weeks_var.trace_add("write", lambda *_args: self._refresh_saturday_controls())
@@ -102,41 +104,7 @@ class CalendarApp(tk.Tk):
         y = max(0, (screen_height - height) // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
 
-    @staticmethod
-    def _blank_planning() -> PlanningInput:
-        day_period_counts = {day: 6 for day in range(1, 6)}
-        periods = build_daily_periods(
-            period_count=6,
-            duration_minutes=45,
-            transition_minutes=5,
-            break_start=time(10, 5),
-            break_end=time(10, 25),
-            lunch_start=time(13, 40),
-            lunch_end=time(15, 0),
-            lunch_after_period=6,
-        )
-        return PlanningInput(
-            weeks=1,
-            subjects=(),
-            teachers=(),
-            classrooms=(),
-            slots=build_slots(
-                weeks=1, days=5, daily_periods=periods, day_period_counts=day_period_counts
-            ),
-            teacher_subjects={},
-            teacher_classrooms={},
-            course_name="",
-            day_period_counts=day_period_counts,
-            period_duration_minutes=45,
-            transition_minutes=5,
-            break_start=time(10, 5),
-            break_end=time(10, 25),
-            lunch_start=time(13, 40),
-            lunch_end=time(15, 0),
-            lunch_after_period=6,
-            teacher_unavailable_days={},
-            subject_unavailable_days={},
-        )
+    _blank_planning = staticmethod(default_planning)
 
     def _build_ui(self) -> None:
         header = ttk.Frame(self, style="Header.TFrame", padding=(24, 16))
@@ -682,7 +650,9 @@ class CalendarApp(tk.Tk):
         for child in self.saturday_frame.winfo_children():
             child.destroy()
         self.saturday_vars = {
-            week: tk.BooleanVar(value=self.saturday_vars.get(week, tk.BooleanVar()).get())
+            week: self.saturday_vars[week]
+            if week in self.saturday_vars
+            else tk.BooleanVar(value=False)
             for week in range(1, weeks + 1)
         }
         ttk.Label(self.saturday_frame, text="Sábado activo en:", style="Muted.TLabel").grid(
@@ -1051,10 +1021,10 @@ class CalendarApp(tk.Tk):
             self.destroy()
 
     def _set_planning(self, planning: PlanningInput) -> None:
+        """Populate editors and overview without replacing the generated schedule."""
         self.planning = planning
         self.course_var.set(planning.course_name)
         self.weeks_var.set(planning.weeks)
-        self.classrooms_var.set(", ".join(classroom.name for classroom in planning.classrooms))
         self.classroom_list.delete(0, tk.END)
         for classroom in planning.classrooms:
             self.classroom_list.insert(tk.END, classroom.name)
@@ -1092,12 +1062,11 @@ class CalendarApp(tk.Tk):
             for week in range(1, planning.weeks + 1)
         }
         self._refresh_editors()
-        self._refresh_unavailable_editors()
-        self._refresh_subject_rule_editors()
         self._refresh_saturday_controls()
         self.week_combo["values"] = [str(week) for week in range(1, planning.weeks + 1)]
         self.week_var.set("1")
         self._loaded_clock_signature = self._clock_signature()
+        self._loaded_slot_signature = self._slot_signature()
         self._update_clock_preview()
         self.overview.show(planning)
 
@@ -1115,6 +1084,13 @@ class CalendarApp(tk.Tk):
 
     def _clock_signature(self) -> tuple[str | int, ...]:
         return tuple(variable.get() for variable in self._clock_variables())
+
+    def _slot_signature(self) -> tuple:
+        return (
+            self.weeks_var.get(),
+            tuple((day, variable.get()) for day, variable in self.day_count_vars.items()),
+            tuple(week for week, variable in self.saturday_vars.items() if variable.get()),
+        )
 
     def _daily_periods(self) -> tuple[tuple[time, time], ...]:
         start = parse_optional_time(self.class_start_var.get())
@@ -1194,12 +1170,10 @@ class CalendarApp(tk.Tk):
             self.clock_preview_var.set(f"Revisa el reloj: {error}")
 
     def _sync_planning(self) -> PlanningInput:
+        """Validate editor values, preserving imported slots until the clock or cycle changes."""
         if self.planning is None:
             raise ValueError("No hay una configuración cargada.")
-        self.classrooms_var.set(", ".join(self.classroom_list.get(0, tk.END)))
-        classrooms = tuple(
-            Classroom(name.strip()) for name in self.classrooms_var.get().split(",") if name.strip()
-        )
+        classrooms = tuple(Classroom(name) for name in self.classroom_list.get(0, tk.END))
         weeks = int(self.weeks_var.get())
         if not 1 <= weeks <= 52:
             raise ValueError("Indica entre 1 y 52 semanas para el ciclo.")
@@ -1210,23 +1184,26 @@ class CalendarApp(tk.Tk):
         saturday_weeks = frozenset(
             week for week, variable in self.saturday_vars.items() if variable.get()
         )
-        classroom_names = {classroom.name for classroom in classrooms}
         teacher_unavailable_days = self.planning.teacher_unavailable_days or {}
         subject_unavailable_days = self.planning.subject_unavailable_days or {}
         teacher_classrooms = {
             teacher: frozenset(rooms) for teacher, rooms in self.teacher_classrooms.items() if rooms
         }
-        if not teacher_classrooms:
-            teacher_classrooms = {teacher: classroom_names for teacher in self.teachers}
         periods = self._daily_periods()
-        return PlanningInput(
+        preserve_slots = (
+            self._loaded_clock_signature == self._clock_signature()
+            and self._loaded_slot_signature == self._slot_signature()
+        )
+        planning = PlanningInput(
             weeks=weeks,
             subjects=tuple(
                 Subject(name, lessons, double) for name, lessons, double in self.subjects
             ),
             teachers=tuple(Teacher(name) for name in self.teachers),
             classrooms=classrooms,
-            slots=build_slots(
+            slots=self.planning.slots
+            if preserve_slots
+            else build_slots(
                 weeks=weeks,
                 days=days,
                 daily_periods=tuple(periods),
@@ -1254,6 +1231,8 @@ class CalendarApp(tk.Tk):
             day_period_counts=day_period_counts,
             saturday_weeks=saturday_weeks,
         )
+        validate_planning(planning)
+        return planning
 
     def _save(self) -> None:
         if self._editor_snapshot is not None:
@@ -1318,9 +1297,10 @@ class CalendarApp(tk.Tk):
     def _add_subject(self) -> None:
         name = self.subject_name_var.get().strip()
         if name and name not in {subject[0] for subject in self.subjects}:
-            self.subjects.append(
-                (name, max(1, int(self.subject_lessons_var.get())), self.subject_double_var.get())
-            )
+            lessons = self._read_subject_frequency()
+            if lessons is None:
+                return
+            self.subjects.append((name, lessons, self.subject_double_var.get()))
             self.subject_name_var.set("")
             self._refresh_editors()
 
@@ -1341,17 +1321,23 @@ class CalendarApp(tk.Tk):
         if not new_name:
             messagebox.showinfo("Editar asignatura", "Escribe el nuevo nombre antes de editar.")
             return
+        if not self._unique_name(new_name, old_name, [name for name, _, _ in self.subjects]):
+            return
+        frequency = self._read_subject_frequency()
+        if frequency is None:
+            return
         for index, (name, lessons, double) in enumerate(self.subjects):
             if name == old_name:
                 self.subjects[index] = (
                     new_name,
-                    max(1, int(self.subject_lessons_var.get())),
+                    frequency,
                     self.subject_double_var.get(),
                 )
         for subjects in self.teacher_subjects.values():
             if old_name in subjects:
                 subjects.remove(old_name)
                 subjects.add(new_name)
+        self._update_resource_rules("subject", old_name, new_name)
         self.subject_name_var.set("")
         self._refresh_editors()
 
@@ -1362,6 +1348,7 @@ class CalendarApp(tk.Tk):
             self.subjects = [subject for subject in self.subjects if subject[0] != name]
             for subjects in self.teacher_subjects.values():
                 subjects.discard(name)
+            self._update_resource_rules("subject", name, None)
             self._refresh_editors()
 
     def _add_teacher(self) -> None:
@@ -1384,9 +1371,12 @@ class CalendarApp(tk.Tk):
             return
         index = selected[0]
         old_name = self.teachers[index]
+        if not self._unique_name(new_name, old_name, self.teachers):
+            return
         self.teachers[index] = new_name
         self.teacher_subjects[new_name] = self.teacher_subjects.pop(old_name, set())
         self.teacher_classrooms[new_name] = self.teacher_classrooms.pop(old_name, set())
+        self._update_resource_rules("teacher", old_name, new_name)
         self.teacher_name_var.set("")
         self._refresh_editors()
 
@@ -1410,6 +1400,8 @@ class CalendarApp(tk.Tk):
             return
         index = selected[0]
         old_name = self.classroom_list.get(index)
+        if not self._unique_name(new_name, old_name, self.classroom_list.get(0, tk.END)):
+            return
         self.classroom_list.delete(index)
         self.classroom_list.insert(index, new_name)
         for classrooms in self.teacher_classrooms.values():
@@ -1434,6 +1426,8 @@ class CalendarApp(tk.Tk):
             name = self.teachers[selected[0]]
             self.teachers.remove(name)
             self.teacher_subjects.pop(name, None)
+            self.teacher_classrooms.pop(name, None)
+            self._update_resource_rules("teacher", name, None)
             self._refresh_editors()
 
     def _add_association(self) -> None:
@@ -1487,6 +1481,19 @@ class CalendarApp(tk.Tk):
         self.classroom_teacher_combo["values"] = self.teachers
         self.unavailable_teacher_combo["values"] = self.teachers
         self.unavailable_subject_combo["values"] = [name for name, _, _ in self.subjects]
+        for variable, values in (
+            (self.association_subject_var, subjects),
+            (self.association_teacher_var, self.teachers),
+            (self.classroom_teacher_var, self.teachers),
+            (self.unavailable_teacher_var, self.teachers),
+            (self.unavailable_subject_var, subjects),
+            (self.consecutive_first_var, subjects),
+            (self.consecutive_second_var, subjects),
+            (self.parallel_first_var, subjects),
+            (self.parallel_second_var, subjects),
+        ):
+            if variable.get() not in values:
+                variable.set("")
         if subjects and not self.association_subject_var.get():
             self.association_subject_var.set(subjects[0])
         if self.teachers and not self.association_teacher_var.get():
@@ -1502,8 +1509,58 @@ class CalendarApp(tk.Tk):
         if self.teachers and not self.classroom_teacher_var.get():
             self.classroom_teacher_var.set(self.teachers[0])
         self._refresh_subject_rule_editors()
+        self._refresh_unavailable_editors()
+
+    def _read_subject_frequency(self) -> int | None:
+        try:
+            frequency = int(self.subject_lessons_var.get())
+            if frequency < 1:
+                raise ValueError
+            return frequency
+        except (ValueError, tk.TclError):
+            messagebox.showerror(
+                "Frecuencia inválida",
+                "Indica al menos una sesión semanal.",
+                parent=self.editor_window,
+            )
+            return None
+
+    def _unique_name(self, name: str, previous: str, names) -> bool:
+        if name != previous and name in names:
+            messagebox.showerror(
+                "Nombre duplicado", f"Ya existe «{name}».", parent=self.editor_window
+            )
+            return False
+        return True
+
+    def _update_resource_rules(self, kind: str, previous: str, name: str | None) -> None:
+        """Keep name-based restrictions attached to renamed resources and remove orphan rules."""
+        if self.planning is None:
+            return
+        field = f"{kind}_unavailable_days"
+        days = dict(getattr(self.planning, field) or {})
+        blocked = days.pop(previous, None)
+        if name is not None and blocked is not None:
+            days[name] = blocked
+        changes = {field: days}
+        if kind == "subject":
+            for field in ("forbidden_consecutive", "forbidden_parallel"):
+                changes[field] = frozenset(
+                    frozenset(name if value == previous else value for value in pair)
+                    for pair in getattr(self.planning, field)
+                    if name is not None or previous not in pair
+                )
+        self.planning = replace(self.planning, **changes)
 
     def _add_classroom_association(self) -> None:
+        association = self._read_classroom_association()
+        if association is not None:
+            teacher, classrooms = association
+            self.teacher_classrooms[teacher] = classrooms
+            self.classroom_names_var.set("")
+            self._refresh_editors()
+
+    def _read_classroom_association(self) -> tuple[str, set[str]] | None:
         teacher = self.classroom_teacher_var.get().strip()
         classrooms = {
             room.strip() for room in self.classroom_names_var.get().split(",") if room.strip()
@@ -1512,13 +1569,12 @@ class CalendarApp(tk.Tk):
         unknown = classrooms - valid_classrooms
         if unknown:
             messagebox.showerror(
-                "Aula desconocida", f"Define primero estas aulas: {', '.join(sorted(unknown))}"
+                "Aula desconocida",
+                f"Define primero estas aulas: {', '.join(sorted(unknown))}",
+                parent=self.editor_window,
             )
-            return
-        if teacher and classrooms:
-            self.teacher_classrooms[teacher] = classrooms
-            self.classroom_names_var.set("")
-            self._refresh_editors()
+            return None
+        return (teacher, classrooms) if teacher in self.teachers and classrooms else None
 
     def _remove_classroom_association(self) -> None:
         selected = self.classroom_association_tree.selection()
@@ -1529,11 +1585,11 @@ class CalendarApp(tk.Tk):
 
     def _edit_classroom_association(self) -> None:
         selected = self.classroom_association_tree.selection()
-        teacher = self.classroom_teacher_var.get().strip()
-        classrooms = {
-            room.strip() for room in self.classroom_names_var.get().split(",") if room.strip()
-        }
-        if selected and teacher and classrooms:
+        if not selected:
+            return
+        association = self._read_classroom_association()
+        if association is not None:
+            teacher, classrooms = association
             old_teacher = self.classroom_association_tree.item(selected[0], "values")[0]
             self.teacher_classrooms.pop(old_teacher, None)
             self.teacher_classrooms[teacher] = classrooms

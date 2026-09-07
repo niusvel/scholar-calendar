@@ -7,6 +7,7 @@ from itertools import pairwise
 from ortools.sat.python import cp_model
 
 from .models import PlanningInput
+from .validation import validate_planning
 
 
 class ScheduleError(ValueError):
@@ -31,6 +32,8 @@ class Schedule:
 
 
 def solve(planning: PlanningInput) -> Schedule:
+    """Find a feasible weekly allocation; all configured rules are mandatory."""
+    validate_planning(planning)
     model = cp_model.CpModel()
     subjects = {subject.name: subject for subject in planning.subjects}
     teachers = {teacher.name for teacher in planning.teachers}
@@ -82,11 +85,12 @@ def solve(planning: PlanningInput) -> Schedule:
     day_slots = defaultdict(list)
     for index, slot in enumerate(slots):
         day_slots[slot.week, slot.day].append(index)
+    for indexes in day_slots.values():
+        indexes.sort(key=lambda index: slots[index].period)
     consecutive_slots = [
         (left, right)
         for indexes in day_slots.values()
-        for left in indexes
-        for right in indexes
+        for left, right in pairwise(indexes)
         if slots[right].period == slots[left].period + 1
     ]
     presence: dict[tuple[str, str, int], cp_model.IntVar] = {}
@@ -127,7 +131,7 @@ def solve(planning: PlanningInput) -> Schedule:
                         continue
                     model.Add(sum(day_presence) <= 2)
 
-                    pair_by_left_index: dict[int, cp_model.IntVar] = {}
+                    pairs_by_slot = defaultdict(list)
                     for left_index, right_index in pairwise(day_indexes):
                         left_slot = slots[left_index]
                         right_slot = slots[right_index]
@@ -145,21 +149,17 @@ def solve(planning: PlanningInput) -> Schedule:
                         model.Add(pair <= left_presence)
                         model.Add(pair <= right_presence)
                         model.Add(pair >= left_presence + right_presence - 1)
-                        pair_by_left_index[left_index] = pair
+                        pairs_by_slot[left_index].append(pair)
+                        pairs_by_slot[right_index].append(pair)
 
                     singleton_variables = []
                     for index in day_indexes:
                         singleton = model.NewBoolVar(
                             f"double_single_{classroom}_{subject.name}_{index}"
                         )
-                        adjacent_pairs = []
-                        if index in pair_by_left_index:
-                            adjacent_pairs.append(pair_by_left_index[index])
-                        if index - 1 in pair_by_left_index:
-                            adjacent_pairs.append(pair_by_left_index[index - 1])
                         model.Add(
                             presence[(classroom, subject.name, index)]
-                            == sum(adjacent_pairs) + singleton
+                            == sum(pairs_by_slot[index]) + singleton
                         )
                         singleton_variables.append(singleton)
                     weekly_singletons.extend(singleton_variables)
@@ -170,7 +170,9 @@ def solve(planning: PlanningInput) -> Schedule:
         for slot_index in range(len(slots)):
             first_vars = by_subject_slot[first, slot_index]
             second_vars = by_subject_slot[second, slot_index]
-            model.Add(sum(first_vars) + sum(second_vars) <= 1)
+            first_present = model.NewBoolVar(f"parallel_{first}_{second}_{slot_index}")
+            model.Add(sum(first_vars) == 0).OnlyEnforceIf(first_present.Not())
+            model.Add(sum(second_vars) == 0).OnlyEnforceIf(first_present)
 
     for classroom in classrooms:
         for pair in planning.forbidden_consecutive:
@@ -184,23 +186,15 @@ def solve(planning: PlanningInput) -> Schedule:
                     right_vars = by_room_subject_slot[classroom, right_subject, right_index]
                     model.Add(sum(left_vars) + sum(right_vars) <= 1)
 
-    double_pairs = []
-    for classroom in classrooms:
-        for subject in subjects.values():
-            if not subject.double_period:
-                continue
-            for left_index, right_index in consecutive_slots:
-                pair = model.NewBoolVar(f"double_{classroom}_{subject.name}_{left_index}")
-                model.Add(pair <= presence[classroom, subject.name, left_index])
-                model.Add(pair <= presence[classroom, subject.name, right_index])
-                double_pairs.append(pair)
-
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 10
     solver.parameters.num_search_workers = 8
-    if double_pairs:
-        model.Maximize(sum(double_pairs))
     status = solver.Solve(model)
+    if status == cp_model.UNKNOWN:
+        raise ScheduleError(
+            "Se agotó el tiempo de búsqueda sin encontrar un horario. "
+            "Prueba de nuevo o simplifica la configuración; no se ha demostrado que sea imposible."
+        )
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise ScheduleError("No existe una planificación que cumpla todas las reglas.")
 

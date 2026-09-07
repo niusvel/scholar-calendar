@@ -1,3 +1,5 @@
+"""School resources and relative weekly slots; no calendar dates or UI state."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -36,6 +38,8 @@ class PlanningSlot:
 
 @dataclass(frozen=True)
 class PlanningInput:
+    """Configuration for every classroom; frozen fields may still contain mutable dictionaries."""
+
     weeks: int
     subjects: tuple[Subject, ...]
     teachers: tuple[Teacher, ...]

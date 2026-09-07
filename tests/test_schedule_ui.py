@@ -307,3 +307,81 @@ def test_file_menu_clears_everything_and_reloads_saved_document(app, tmp_path):
         app.file_menu.invoke("Cargar")
     assert app.schedule == schedule
     assert app.file_menu.entrycget("Exportar PDF", "state") == "normal"
+
+
+def test_resource_renames_and_deletion_keep_restrictions_consistent(app):
+    planning = replace(
+        app.planning,
+        subject_unavailable_days={"Matemáticas": frozenset({3})},
+        teacher_unavailable_days={"Ana": frozenset({5})},
+        forbidden_parallel=frozenset({frozenset({"Matemáticas", "Lengua"})}),
+    )
+    app._set_planning(planning)
+    snapshot = app.schedule_planning
+    app._open_editor("subjects")
+    app.subject_tree.selection_set(app.subject_tree.get_children()[0])
+    app.subject_name_var.set("Álgebra")
+    app._edit_subject()
+    app._apply_editor()
+    assert app.planning.subject_unavailable_days == {"Álgebra": frozenset({3})}
+    assert app.planning.forbidden_parallel == frozenset({frozenset({"Álgebra", "Lengua"})})
+    assert "Álgebra" in app.planning.teacher_subjects["Ana"]
+    assert app.schedule_planning is snapshot
+    app._open_editor("teachers")
+    app.teacher_list.selection_set(0)
+    app.teacher_name_var.set("Ana María")
+    app._edit_teacher()
+    app._apply_editor()
+    assert app.planning.teacher_unavailable_days == {"Ana María": frozenset({5})}
+    app._open_editor("subjects")
+    app.subject_tree.selection_set(app.subject_tree.get_children()[0])
+    app._remove_subject()
+    app._apply_editor()
+    assert not app.planning.subject_unavailable_days
+    assert not app.planning.forbidden_parallel
+    assert "Álgebra" not in app.planning.teacher_subjects["Ana María"]
+    app._open_editor("teachers")
+    app.teacher_list.selection_set(0)
+    app._remove_teacher()
+    app._apply_editor()
+    assert not app.planning.teacher_unavailable_days
+    assert "Ana María" not in app.planning.teacher_classrooms
+
+
+def test_duplicate_rename_and_invalid_subject_frequency_do_not_mutate_resources(app):
+    app._open_editor("subjects")
+    original = list(app.subjects)
+    app.subject_tree.selection_set(app.subject_tree.get_children()[0])
+    app.subject_name_var.set("Lengua")
+    with patch("scholar_calendar.desktop.messagebox.showerror") as error:
+        app._edit_subject()
+    error.assert_called_once()
+    assert app.subjects == original
+    app.subject_name_var.set("Nueva")
+    app.subject_lessons_var.set("incorrecto")
+    with patch("scholar_calendar.desktop.messagebox.showerror") as error:
+        app._add_subject()
+    error.assert_called_once()
+    assert app.subjects == original
+    app._cancel_editor()
+
+
+def test_unrestricted_teachers_and_irregular_slots_survive_saving(app, tmp_path):
+    from scholar_calendar.project_file import load_project
+
+    planning = replace(
+        app.planning,
+        classrooms=(Classroom("Aula 1, laboratorio"), *app.planning.classrooms[1:]),
+        slots=tuple(
+            replace(slot, start=time(7, 45)) if slot.week == 2 and slot.period == 1 else slot
+            for slot in app.planning.slots
+        ),
+    )
+    app._set_planning(planning)
+    path = tmp_path / "exact.json"
+    with patch("scholar_calendar.desktop.filedialog.asksaveasfilename", return_value=str(path)):
+        app._save()
+    restored = load_project(path).planning
+    assert restored.slots == planning.slots
+    assert restored.classrooms == planning.classrooms
+    assert restored.teacher_classrooms == {}

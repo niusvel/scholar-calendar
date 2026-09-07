@@ -1,13 +1,28 @@
+"""Configuration conversion, including legacy intervals and optional exact weekly slots."""
+
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from datetime import time
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
 from .clock import DEFAULT_CLASS_START, minutes_since_midnight
-from .models import Classroom, PlanningInput, Subject, Teacher, build_daily_periods, build_slots
+from .models import (
+    Classroom,
+    PlanningInput,
+    PlanningSlot,
+    Subject,
+    Teacher,
+    build_daily_periods,
+    build_slots,
+)
+from .storage import write_json
+from .validation import validate_planning
+
+NULLABLE_FIELDS = ("day_period_counts", "teacher_unavailable_days", "subject_unavailable_days")
 
 
 def _parse_time(value: str) -> time:
@@ -24,6 +39,7 @@ def load_planning(path: str | Path) -> PlanningInput:
 
 
 def planning_from_dict(data: dict[str, Any]) -> PlanningInput:
+    """Read legacy daily intervals or exact slots; validate before exposing the model."""
     explicit_periods = tuple(
         (_parse_time(period["start"]), _parse_time(period["end"]))
         for period in data.get("daily_periods", [])
@@ -66,15 +82,15 @@ def planning_from_dict(data: dict[str, Any]) -> PlanningInput:
     weeks = int(data["weeks"])
     day_period_counts = {
         int(day): int(count)
-        for day, count in data.get("day_period_counts", {}).items()
+        for day, count in (data.get("day_period_counts") or {}).items()
         if int(day) != 7
     }
     if not day_period_counts:
         day_period_counts = {
-            day: len(daily_periods) for day in range(1, int(data.get("days", 5)) + 1)
+            day: len(daily_periods) for day in range(1, min(6, int(data.get("days", 5))) + 1)
         }
     saturday_weeks = frozenset(int(week) for week in data.get("saturday_weeks", []))
-    return PlanningInput(
+    planning = PlanningInput(
         weeks=weeks,
         subjects=tuple(
             Subject(
@@ -86,7 +102,9 @@ def planning_from_dict(data: dict[str, Any]) -> PlanningInput:
         ),
         teachers=tuple(Teacher(item["name"]) for item in data["teachers"]),
         classrooms=tuple(Classroom(item["name"]) for item in data["classrooms"]),
-        slots=build_slots(
+        slots=slots_from_dict(data["slots"])
+        if "slots" in data
+        else build_slots(
             weeks=weeks,
             days=min(6, max(day_period_counts, default=5)),
             daily_periods=daily_periods,
@@ -108,21 +126,26 @@ def planning_from_dict(data: dict[str, Any]) -> PlanningInput:
         course_name=str(data.get("course_name", "")),
         class_start=class_start,
         **pauses,
-        day_period_counts=day_period_counts,
+        day_period_counts=None
+        if "day_period_counts" in data and data["day_period_counts"] is None
+        else day_period_counts,
         saturday_weeks=saturday_weeks,
         period_duration_minutes=int(clock.get("period_minutes", default_duration)),
         transition_minutes=int(clock.get("transition_minutes", default_transition)),
         lunch_after_period=int(clock.get("lunch_after_period", 6)),
-        teacher_unavailable_days={
-            name: frozenset(days) for name, days in data.get("teacher_unavailable_days", {}).items()
-        },
-        subject_unavailable_days={
-            name: frozenset(days) for name, days in data.get("subject_unavailable_days", {}).items()
+        **{
+            field: None
+            if field in data and data[field] is None
+            else {name: frozenset(days) for name, days in data.get(field, {}).items()}
+            for field in ("teacher_unavailable_days", "subject_unavailable_days")
         },
     )
+    validate_planning(planning)
+    return planning
 
 
-def planning_to_dict(planning: PlanningInput) -> dict[str, Any]:
+def planning_to_dict(planning: PlanningInput, *, include_slots: bool = False) -> dict[str, Any]:
+    """Serialize configuration; include_slots preserves irregular cycles exactly."""
     periods: list[dict[str, str]] = []
     seen_periods: set[tuple[str, str]] = set()
     for slot in planning.slots:
@@ -169,8 +192,8 @@ def planning_to_dict(planning: PlanningInput) -> dict[str, Any]:
         "teacher_classrooms": {
             name: sorted(classrooms) for name, classrooms in planning.teacher_classrooms.items()
         },
-        "forbidden_consecutive": [sorted(pair) for pair in planning.forbidden_consecutive],
-        "forbidden_parallel": [sorted(pair) for pair in planning.forbidden_parallel],
+        "forbidden_consecutive": sorted(sorted(pair) for pair in planning.forbidden_consecutive),
+        "forbidden_parallel": sorted(sorted(pair) for pair in planning.forbidden_parallel),
         "teacher_unavailable_days": {
             name: sorted(days) for name, days in (planning.teacher_unavailable_days or {}).items()
         },
@@ -178,11 +201,35 @@ def planning_to_dict(planning: PlanningInput) -> dict[str, Any]:
             name: sorted(days) for name, days in (planning.subject_unavailable_days or {}).items()
         },
     }
+    if include_slots:
+        data["slots"] = slots_to_dict(planning.slots)
+        for field in NULLABLE_FIELDS:
+            if getattr(planning, field) is None:
+                data[field] = None
     return data
 
 
-def save_planning(planning: PlanningInput, path: str | Path) -> None:
-    Path(path).write_text(
-        json.dumps(planning_to_dict(planning), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+def slots_to_dict(slots: tuple[PlanningSlot, ...]) -> list[dict[str, Any]]:
+    return [
+        {**asdict(slot), "start": slot.start.isoformat(), "end": slot.end.isoformat()}
+        for slot in slots
+    ]
+
+
+def slots_from_dict(data: list[dict[str, Any]]) -> tuple[PlanningSlot, ...]:
+    return tuple(
+        PlanningSlot(
+            week=item["week"],
+            day=item["day"],
+            period=item["period"],
+            start=time.fromisoformat(item["start"]),
+            end=time.fromisoformat(item["end"]),
+        )
+        for item in data
     )
+
+
+def save_planning(planning: PlanningInput, path: str | Path) -> None:
+    """Save a standalone configuration atomically, including its exact slots."""
+    validate_planning(planning)
+    write_json(planning_to_dict(planning, include_slots=True), path)

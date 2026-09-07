@@ -8,6 +8,8 @@ from tkinter import ttk
 
 @dataclass(frozen=True)
 class GridRow:
+    """One display row; span_from merges that column through the last column."""
+
     values: tuple[str, ...]
     kind: str = "day_even"
     subjects: tuple[str | None, ...] = ()

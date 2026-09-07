@@ -1,0 +1,29 @@
+{
+  "course_name": "Centro de ejemplo · Inicio rápido",
+  "weeks": 1,
+  "clock": {
+    "start": "08:30",
+    "periods_per_day": 6,
+    "period_minutes": 45,
+    "transition_minutes": 5,
+    "break_start": "10:05",
+    "break_end": "10:25",
+    "lunch_start": "13:40",
+    "lunch_end": "15:00",
+    "lunch_after_period": 6
+  },
+  "day_period_counts": {"1": 6, "2": 6, "3": 6, "4": 6, "5": 6},
+  "saturday_weeks": [],
+  "subjects": [
+    {"name": "Matemáticas", "lessons_per_week": 3, "double_period": false},
+    {"name": "Laboratorio", "lessons_per_week": 2, "double_period": true}
+  ],
+  "teachers": [{"name": "Ana"}, {"name": "Luis"}],
+  "classrooms": [{"name": "Grupo A"}],
+  "teacher_subjects": {"Ana": ["Matemáticas"], "Luis": ["Laboratorio"]},
+  "teacher_classrooms": {},
+  "teacher_unavailable_days": {"Luis": [5]},
+  "subject_unavailable_days": {},
+  "forbidden_consecutive": [],
+  "forbidden_parallel": []
+}

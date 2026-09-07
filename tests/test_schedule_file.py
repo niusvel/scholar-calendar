@@ -69,7 +69,7 @@ def test_invalid_archives_are_rejected(tmp_path, generated, change):
 def test_configuration_file_is_not_mistaken_for_a_saved_schedule(tmp_path, generated):
     path = tmp_path / "config.json"
     save_planning(generated[0], path)
-    with pytest.raises(ValueError, match="Abrir configuración"):
+    with pytest.raises(ValueError, match="Archivo → Cargar"):
         load_schedule(path)
 
 
@@ -78,7 +78,7 @@ def test_failed_save_keeps_the_previous_file(tmp_path, generated):
     save_schedule(*generated, path)
     original = path.read_bytes()
     with (
-        patch("scholar_calendar.schedule_file.os.replace", side_effect=OSError("Disk error")),
+        patch("scholar_calendar.storage.os.replace", side_effect=OSError("Disk error")),
         pytest.raises(OSError),
     ):
         save_schedule(*generated, path)

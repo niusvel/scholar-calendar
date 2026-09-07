@@ -7,8 +7,10 @@ from pathlib import Path
 from .config import planning_from_dict, planning_to_dict
 from .models import PlanningInput
 from .schedule_file import FILE_TYPE as SCHEDULE_FILE_TYPE
-from .schedule_file import schedule_from_dict, schedule_to_dict, write_json
+from .schedule_file import schedule_from_dict, schedule_to_dict
 from .solver import Schedule
+from .storage import write_json
+from .validation import validate_planning
 
 FILE_TYPE = "scholar-calendar-project"
 FILE_VERSION = 1
@@ -16,12 +18,16 @@ FILE_VERSION = 1
 
 @dataclass(frozen=True)
 class CalendarProject:
+    """Current settings plus an optional schedule with its original settings."""
+
     planning: PlanningInput
     schedule_planning: PlanningInput | None = None
     schedule: Schedule | None = None
 
 
 def save_project(project: CalendarProject, path: str | Path) -> None:
+    """Write current settings and any generated snapshot without recalculating lessons."""
+    validate_planning(project.planning)
     generated = None
     if project.schedule is not None:
         if project.schedule_planning is None:
@@ -31,7 +37,7 @@ def save_project(project: CalendarProject, path: str | Path) -> None:
         {
             "type": FILE_TYPE,
             "version": FILE_VERSION,
-            "configuration": planning_to_dict(project.planning),
+            "configuration": planning_to_dict(project.planning, include_slots=True),
             "generated": generated,
         },
         path,
@@ -39,6 +45,7 @@ def save_project(project: CalendarProject, path: str | Path) -> None:
 
 
 def load_project(path: str | Path) -> CalendarProject:
+    """Read a project, legacy schedule or standalone configuration without UI side effects."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("El archivo no contiene una configuración válida.")

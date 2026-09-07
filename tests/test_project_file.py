@@ -67,3 +67,41 @@ def test_schedule_requires_its_configuration_before_writing(tmp_path, generated)
     with pytest.raises(ValueError, match="configuración del horario"):
         save_project(CalendarProject(generated[0], schedule=generated[1]), path)
     assert path.read_text() == "contenido anterior"
+
+
+def test_project_preserves_irregular_configuration_slots_without_a_schedule(tmp_path, generated):
+    from datetime import time
+
+    planning = generated[0]
+    planning = replace(
+        planning,
+        slots=tuple(
+            replace(slot, start=time(7, 45)) if slot.week == 2 and slot.period == 1 else slot
+            for slot in planning.slots
+        ),
+        teacher_unavailable_days=None,
+    )
+    path = tmp_path / "irregular.json"
+    save_project(CalendarProject(planning), path)
+    assert load_project(path).planning == planning
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda data: data.update(weeks=0),
+        lambda data: data["subjects"].append(data["subjects"][0]),
+        lambda data: data.update(subject_unavailable_days={"Asignatura 1": [7]}),
+        lambda data: data.update(forbidden_parallel=[["Asignatura 1"]]),
+        lambda data: data.update(teacher_subjects={"Profesor inexistente": ["Asignatura 1"]}),
+        lambda data: data["slots"][1].update(start="08:30"),
+    ],
+)
+def test_invalid_configuration_is_rejected_before_loading(tmp_path, generated, change):
+    path = tmp_path / "invalid.json"
+    save_project(CalendarProject(generated[0]), path)
+    data = json.loads(path.read_text())
+    change(data["configuration"])
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError):
+        load_project(path)
