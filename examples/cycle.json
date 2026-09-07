@@ -1,0 +1,75 @@
+{
+  "course_name": "1ro de la ESO | Curso 2026-2027",
+  "weeks": 2,
+  "days": 5,
+  "daily_periods": [
+    {"start": "08:00", "end": "09:00"},
+    {"start": "09:00", "end": "10:00"},
+    {"start": "10:30", "end": "11:30"},
+    {"start": "11:30", "end": "12:30"},
+    {"start": "14:00", "end": "15:00"},
+    {"start": "15:00", "end": "16:00"}
+  ],
+  "day_period_counts": {
+    "1": 6,
+    "2": 6,
+    "3": 6,
+    "4": 6,
+    "5": 4,
+    "6": 4
+  },
+  "saturday_weeks": [2],
+  "teacher_unavailable_days": {},
+  "subject_unavailable_days": {},
+  "subjects": [
+    {"name": "Asignatura 1", "lessons_per_cycle": 1},
+    {"name": "Asignatura 2", "lessons_per_cycle": 1},
+    {"name": "Asignatura 3", "lessons_per_cycle": 1},
+    {"name": "Asignatura 4", "lessons_per_cycle": 1},
+    {"name": "Asignatura 5", "lessons_per_cycle": 1},
+    {"name": "Asignatura 6", "lessons_per_cycle": 1},
+    {"name": "Asignatura 7", "lessons_per_cycle": 1},
+    {"name": "Asignatura 8", "lessons_per_cycle": 1},
+    {"name": "Asignatura 9", "lessons_per_cycle": 1},
+    {"name": "Asignatura 10", "lessons_per_cycle": 1},
+    {"name": "Asignatura 11", "lessons_per_cycle": 1},
+    {"name": "Asignatura 12", "lessons_per_cycle": 1}
+  ],
+  "teachers": [
+    {"name": "Profesor 1"}, {"name": "Profesor 2"}, {"name": "Profesor 3"},
+    {"name": "Profesor 4"}, {"name": "Profesor 5"}, {"name": "Profesor 6"},
+    {"name": "Profesor 7"}, {"name": "Profesor 8"}, {"name": "Profesor 9"},
+    {"name": "Profesor 10"}, {"name": "Profesor 11"}, {"name": "Profesor 12"},
+    {"name": "Profesor 13"}, {"name": "Profesor 14"}, {"name": "Profesor 15"}
+  ],
+  "classrooms": [
+    {"name": "Aula 1"}, {"name": "Aula 2"}, {"name": "Aula 3"}, {"name": "Aula 4"},
+    {"name": "Aula 5"}, {"name": "Aula 6"}
+  ],
+  "teacher_subjects": {
+    "Profesor 1": ["Asignatura 1", "Asignatura 2", "Asignatura 3"],
+    "Profesor 2": ["Asignatura 2", "Asignatura 3", "Asignatura 4"],
+    "Profesor 3": ["Asignatura 4", "Asignatura 5", "Asignatura 6"],
+    "Profesor 4": ["Asignatura 5", "Asignatura 6", "Asignatura 7"],
+    "Profesor 5": ["Asignatura 7", "Asignatura 8", "Asignatura 9"],
+    "Profesor 6": ["Asignatura 8", "Asignatura 9", "Asignatura 10"],
+    "Profesor 7": ["Asignatura 1", "Asignatura 6", "Asignatura 10"],
+    "Profesor 8": ["Asignatura 1", "Asignatura 2", "Asignatura 3", "Asignatura 4", "Asignatura 5", "Asignatura 6", "Asignatura 7", "Asignatura 8", "Asignatura 9", "Asignatura 10"],
+    "Profesor 9": ["Asignatura 11"],
+    "Profesor 10": ["Asignatura 12"]
+  },
+  "teacher_classrooms": {
+    "Profesor 1": ["Aula 1", "Aula 2", "Aula 3", "Aula 4"],
+    "Profesor 2": ["Aula 1", "Aula 2", "Aula 3", "Aula 4"],
+    "Profesor 3": ["Aula 1", "Aula 2", "Aula 3", "Aula 4"],
+    "Profesor 4": ["Aula 1", "Aula 2", "Aula 3", "Aula 4"],
+    "Profesor 5": ["Aula 1", "Aula 2", "Aula 3", "Aula 4"],
+    "Profesor 6": ["Aula 1", "Aula 2", "Aula 3", "Aula 4"],
+    "Profesor 7": ["Aula 1", "Aula 2", "Aula 3", "Aula 4"],
+    "Profesor 8": ["Aula 1", "Aula 2", "Aula 3", "Aula 4", "Aula 5", "Aula 6"],
+    "Profesor 9": ["Aula 1", "Aula 2", "Aula 3", "Aula 4", "Aula 5", "Aula 6"],
+    "Profesor 10": ["Aula 1", "Aula 2", "Aula 3", "Aula 4", "Aula 5", "Aula 6"]
+  },
+  "forbidden_consecutive": [["Asignatura 1", "Asignatura 2"]],
+  "forbidden_parallel": [["Asignatura 3", "Asignatura 4"]]
+}
