@@ -32,9 +32,10 @@ class Schedule:
 
 
 def solve(planning: PlanningInput) -> Schedule:
-    """Find a feasible weekly allocation; all configured rules are mandatory."""
+    """Respect mandatory rules and minimize violations of the scheduling preferences."""
     validate_planning(planning)
     model = cp_model.CpModel()
+    penalties = []
     subjects = {subject.name: subject for subject in planning.subjects}
     teachers = {teacher.name for teacher in planning.teachers}
     classrooms = {classroom.name for classroom in planning.classrooms}
@@ -109,6 +110,16 @@ def solve(planning: PlanningInput) -> Schedule:
             for week in range(1, planning.weeks + 1):
                 weekly_variables = by_room_subject_week[classroom, subject.name, week]
                 model.Add(sum(weekly_variables) == subject.lessons_per_cycle)
+                if subject.lessons_per_cycle > 0:
+                    outside_late_periods = [
+                        presence[classroom, subject.name, index]
+                        for index, slot in enumerate(slots)
+                        if slot.week == week and slot.period not in (5, 6)
+                    ]
+                    always_late = model.NewBoolVar(f"always_late_{classroom}_{subject.name}_{week}")
+                    model.Add(sum(outside_late_periods) == 0).OnlyEnforceIf(always_late)
+                    model.Add(sum(outside_late_periods) >= 1).OnlyEnforceIf(always_late.Not())
+                    penalties.append(always_late)
 
     for slot_index in range(len(slots)):
         for classroom in classrooms:
@@ -151,6 +162,15 @@ def solve(planning: PlanningInput) -> Schedule:
                         model.Add(pair >= left_presence + right_presence - 1)
                         pairs_by_slot[left_index].append(pair)
                         pairs_by_slot[right_index].append(pair)
+                        if (
+                            planning.break_start is not None
+                            and planning.break_end is not None
+                            and left_slot.end
+                            <= planning.break_start
+                            < planning.break_end
+                            <= right_slot.start
+                        ):
+                            penalties.append(pair)
 
                     singleton_variables = []
                     for index in day_indexes:
@@ -189,6 +209,7 @@ def solve(planning: PlanningInput) -> Schedule:
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 10
     solver.parameters.num_search_workers = 8
+    model.Minimize(sum(penalties))
     status = solver.Solve(model)
     if status == cp_model.UNKNOWN:
         raise ScheduleError(

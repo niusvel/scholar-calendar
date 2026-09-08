@@ -55,8 +55,8 @@ bloqueados** abren el de restricciones, que es distinto al de asociaciones.
 En cualquier diálogo, **Guardar cambios** aplica la edición a la configuración
 en memoria. **Cancelar**, Escape o cerrar ese diálogo descarta todos los cambios
 de esa edición, incluso altas y bajas. Para conservarlos en disco utiliza después
-**Archivo → Guardar**. Los errores de validación mantienen abierto el editor.
-Las operaciones del menú Archivo se desactivan mientras se edita.
+**Menú ☰ → Guardar**. Los errores de validación mantienen abierto el editor.
+Las operaciones del menú ☰ se desactivan mientras se edita.
 
 ## Jornada y reloj
 
@@ -65,7 +65,7 @@ Las operaciones del menú Archivo se desactivan mientras se edita.
 | Ciclo | 1 semana |
 | Lunes a viernes | 6 turnos por día |
 | Sábado | 0 turnos, sin semanas activadas |
-| Inicio | 08:30 |
+| Inicio | 07:40 |
 | Clase | 45 minutos |
 | Cambio | 5 minutos |
 | Merienda | 10:05–10:25 |
@@ -75,11 +75,11 @@ Introduce horas en formato `HH:MM`. Para quitar una pausa, vacía tanto su inici
 como su final. Para habilitar un sábado, indica sus turnos y marca las semanas en
 las que se utiliza. Un domingo nunca se incluye.
 
-La tabla de franjas muestra actividades, horas y duración. Los dos primeros
-turnos iniciales son 08:30–09:15 y 09:20–10:05; tras la merienda, el tercero empieza
-a las 10:25. No se recortan clases para hacerlas caber antes de una pausa.
+La tabla de franjas muestra actividades, horas y duración. Los tres primeros
+turnos iniciales son 07:40–08:25, 08:30–09:15 y 09:20–10:05; tras la merienda,
+el cuarto empieza a las 10:25. No se recortan clases para hacerlas caber antes de una pausa.
 
-La comida no añade turnos: con seis turnos la jornada termina a las 13:40. Si
+La comida no añade turnos: con seis turnos la jornada termina a las 12:50. Si
 habilitas un séptimo, comienza como mínimo a las 15:00. La vista del horario
 muestra pausas entre clases; no añade una fila de comida después de la última
 clase. Consulta [el cálculo del reloj](03-planificacion.md#el-reloj-escolar) para
@@ -94,8 +94,10 @@ el centro. Activa **Doble** para agrupar sesiones de esa asignatura en parejas.
 Selecciona una fila, modifica los campos y pulsa **Editar** para cambiar un
 recurso. Los nombres deben ser únicos dentro de su tipo. Al renombrar asignaturas
 o profesores se actualizan sus asociaciones y restricciones; al eliminarlos se
-retiran las referencias correspondientes. El horario ya generado conserva sus
-nombres y configuración originales hasta que generes otro.
+retiran las referencias correspondientes. Si únicamente cambias nombres de asignaturas, profesores o aulas, se actualizan
+en el horario ya generado al guardar los cambios del diálogo, sin mover clases.
+También se actualizan el resaltado, las referencias y la exportación PDF. El
+nombre del curso se puede actualizar sin generar de nuevo.
 
 Asocia cada profesor con las asignaturas que puede impartir. En las asociaciones
 de aulas, escribe nombres existentes separados por comas. Una limitación con
@@ -122,6 +124,37 @@ Para quitar un bloqueo o pareja, selecciona su fila y pulsa Eliminar. Una lista
 vacía no añade restricciones. Las reglas completas, incluidos los límites de
 repetición diaria, se describen en [Planificación](03-planificacion.md).
 
+## Preferencias de generación
+
+El generador intenta cumplir también dos preferencias no obligatorias:
+
+- Que cada asignatura tenga al menos una sesión fuera de los turnos 5.º y 6.º,
+  en cada aula y semana. No prohíbe utilizar esos turnos.
+- Que la merienda no quede entre las dos sesiones de un doble. Se usa la hora
+  configurada de merienda, aunque se haya cambiado respecto al valor inicial.
+
+Las dos tienen el mismo peso. Si no se pueden cumplir a la vez, se busca reducir
+el total de incumplimientos. Nunca se eliminan clases ni se incumplen reglas
+obligatorias para cumplir estas preferencias. Se aplican al generar, no al cargar
+un horario existente.
+
+## Cuándo hay que generar otro horario
+
+Cambiar frecuencias, marcas de doble, asociaciones, días bloqueados, parejas
+incompatibles, recursos, reloj o estructura del ciclo requiere una nueva
+asignación. Aparece un aviso amarillo visible desde ambas pestañas, con el botón
+**Generar de nuevo**. El horario anterior sigue disponible para consulta y PDF,
+pero no representa la configuración editada.
+
+El aviso se mantiene al guardar y volver a cargar, y si falla la nueva generación.
+Desaparece cuando se genera correctamente o se restauran los valores con los que
+se calculó el horario. Limpiar retira tanto el horario como el aviso.
+
+Si una misma edición mezcla un renombrado con cambios de generación, el horario
+anterior conserva sus nombres hasta regenerar. Si ya había cambios pendientes,
+un renombrado no los resuelve. No se deducen identidades por la posición de los
+recursos en archivos editados externamente.
+
 ## Generar y consultar
 
 Pulsa **Generar horario**. La aplicación muestra el resultado en la pestaña
@@ -141,21 +174,31 @@ recorrer aulas y días; el horario admite también rueda y Shift + rueda horizon
 
 ## Guardar, cargar y exportar
 
-| Menú Archivo | Resultado |
+El botón con el icono ☰, a la izquierda de la cabecera, abre el menú.
+
+| Menú ☰ | Resultado |
 | --- | --- |
 | Guardar / ⌘S | Abre un selector de destino y escribe configuración y horario opcional. |
 | Cargar / ⌘O | Abre un JSON actual o antiguo y recupera sus datos. |
-| Exportar PDF | Escribe el último horario generado o cargado, con un día por página. |
 | Limpiar | Restablece un centro vacío con los valores iniciales. |
+| Reglas de generación | Abre una ventana centrada con las reglas obligatorias, dinámicas y opcionales. |
 | Salir / ⌘Q | Cierra la aplicación. |
 
 Guardar permite elegir un nombre diferente cada vez. Cargar un documento con
 horario no vuelve a ejecutar el planificador. Cargar solo una configuración
 retira de la pantalla el horario que hubiera abierto anteriormente.
 
+El botón **Exportar PDF**, junto a **Generar horario**, se habilita cuando hay un
+horario generado o cargado. Exporta un día por página.
+
 El PDF es A4 horizontal. Incluye curso, semana y día; los días especialmente
 largos se reducen para caber en una sola página. No se exporta el resaltado
 interactivo ni la nota de restricciones.
+
+Para exportar la explicación del motor, abre **Menú ☰ → Reglas de generación**
+y pulsa **Exportar PDF** en esa ventana. Incluye las tres categorías completas,
+independientemente de la pestaña seleccionada, en A4 vertical con páginas numeradas.
+Esta exportación está disponible aunque todavía no hayas generado un horario.
 
 No hay guardado automático ni aviso de cambios pendientes al cargar, limpiar o
 salir. Guarda antes de esas acciones si quieres conservar las modificaciones.
@@ -169,7 +212,7 @@ Limpiar no borra archivos del disco.
 | No se encuentra una planificación | Revisa frecuencias, turnos, días bloqueados, repetición diaria y disponibilidad de profesores. |
 | Se agota la búsqueda | El límite es 10 segundos; vuelve a intentar o simplifica las restricciones. Esto no demuestra imposibilidad. |
 | Aparece tiempo libre | No cabe una clase completa antes de la pausa; revisa inicio, duración y cambios. |
-| El PDF conserva nombres u horas anteriores | Exporta el horario existente. Genera otro para aplicar la configuración editada. |
+| El PDF conserva datos anteriores | Revisa si hay un aviso de regeneración: exporta el horario existente. Los cambios únicamente de nombres sí se aplican sin regenerar. |
 | Un archivo antiguo abre a otra hora | Se respetan sus horas explícitas; los nuevos valores por defecto no sustituyen datos guardados. |
 | Un JSON se rechaza | Comprueba versión, referencias, nombres únicos, días válidos y franjas no solapadas. |
 | La aplicación tarda al generar | La resolución se ejecuta en el hilo de la interfaz; durante la búsqueda puede no responder. |

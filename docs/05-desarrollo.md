@@ -60,7 +60,7 @@ mutarlos.
 | `day_period_counts` | Mapa de días a turnos, o `None`. |
 | `saturday_weeks` | `frozenset[int]`, inicialmente vacío. |
 | `period_duration_minutes`, `transition_minutes` | 45 y 5 por defecto. |
-| `class_start` | `08:30` por defecto. |
+| `class_start` | `07:40` por defecto. |
 | `break_start`, `break_end` | `10:05` y `10:25`; admiten `None`. |
 | `lunch_start`, `lunch_end` | `None` en el constructor del modelo. |
 | `lunch_after_period` | 6 por defecto. |
@@ -109,6 +109,20 @@ que los recibidos: el llamador debe construir suficientes `daily_periods`.
 
 `TimelineRow` contiene `start`, `end`, `label` y `period=None` para las pausas.
 Su propiedad `hours` produce `HH:MM – HH:MM`.
+
+## Actualizar un horario sin resolver
+
+`schedule_updates.ResourceRename(kind, before, after)` representa un renombrado
+explícito de `subject`, `teacher` o `classroom`. Pasa una tupla de estas operaciones,
+en orden, a `update_schedule_metadata(current, generated, schedule, renames=())`.
+La función devuelve `(configuración_del_horario, horario)` y no modifica sus
+argumentos. Solo aplica renombrados cuando el resultado sigue siendo compatible
+con las entradas de generación actuales.
+
+`requires_regeneration(current, generated)` compara sus firmas de generación.
+No valida un horario ni ejecuta el solver. Los cambios exclusivos del nombre del
+curso se excluyen de la comparación; otros nombres requieren el renombrado
+explícito para conservar las referencias.
 
 ## Funciones de archivo y PDF
 
@@ -203,7 +217,8 @@ entorno restringido se necesita acceso a la sesión gráfica para crear Tk.
 | --- | --- |
 | `test_clock.py` | Alineación de clases, pausas, huecos y validación del reloj. |
 | `test_calendar_config.py` | Configuración, intervalos explícitos, sábados y compatibilidad. |
-| `test_solver.py` | Frecuencias, dobles, días bloqueados, incompatibilidades y tiempo agotado. |
+| `test_solver.py` | Frecuencias, dobles, días bloqueados, incompatibilidades, preferencias y tiempo agotado. |
+| `test_schedule_updates.py` | Clasificación de cambios, renombrado de referencias y ediciones mixtas. |
 | `test_project_file.py` | Documento unificado, ciclos irregulares y rechazo de configuraciones inválidas. |
 | `test_schedule_file.py` | Horarios históricos, asignaciones exactas, corrupción y fallo de escritura. |
 | `test_schedule_ui.py` | Diálogos, cancelación, menú, selección, renombrado, guardado y limpieza. |
@@ -220,12 +235,15 @@ puede elegir soluciones diferentes igualmente válidas.
 - **Nueva restricción:** define su representación y validación, añade el editor,
   el resumen y la nota, implementa la condición en `solver.py` y documenta su
   semántica y serialización. Añade un caso que permita distinguirla de otra regla.
+  Actualiza también `rules_catalog.py`: la ayuda y el PDF comparten ese contenido.
 - **Nuevo valor del reloj:** revisa modelo, configuración, valores iniciales y
   variables del formulario. Mantén las firmas de reloj y ciclo al día para no
   reconstruir accidentalmente archivos importados.
 - **Cambio visual:** modifica primero `theme.py` o el componente correspondiente.
   Comprueba ventana mínima de 980 × 650, diálogos, textos largos, foco por teclado,
   botones desactivados y desplazamiento. Conserva los bindings de ttk.
+  Los botones usan imágenes con esquinas transparentes; el fondo de ttk debe
+  mantenerse igual al del contenedor en todos los estados para conservar el redondeo.
 - **Cambio de formato incompatible:** aumenta la versión y define explícitamente
   su lectura/migración. Los campos opcionales nuevos deben tener un comportamiento
   definido cuando falten.

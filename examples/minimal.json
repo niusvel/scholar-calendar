@@ -2,7 +2,7 @@
   "course_name": "Centro de ejemplo · Inicio rápido",
   "weeks": 1,
   "clock": {
-    "start": "08:30",
+    "start": "07:40",
     "periods_per_day": 6,
     "period_minutes": 45,
     "transition_minutes": 5,

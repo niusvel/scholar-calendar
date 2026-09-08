@@ -21,6 +21,8 @@ def configure_styles(root: tk.Tk) -> None:
     style.configure("TFrame", background="white")
     style.configure("TLabel", background="white")
     style.configure("App.TFrame", background=PAPER)
+    style.configure("Warning.TFrame", background="#fff4dc")
+    style.configure("Warning.TLabel", background="#fff4dc", foreground="#805d19")
     style.configure("Card.TFrame", background="white")
     style.configure("Header.TFrame", background="white")
     style.configure(
@@ -109,6 +111,8 @@ def configure_styles(root: tk.Tk) -> None:
             background="#edf2f5",
             arrowcolor=MUTED,
             arrowsize=13,
+            insertcolor=INK,
+            insertwidth=2,
         )
         style.map(
             widget,
@@ -131,6 +135,26 @@ def configure_styles(root: tk.Tk) -> None:
     root.option_add("*Listbox.selectBorderWidth", 0)
     root.option_add("*Listbox.activeStyle", "none")
     _modern_surfaces(root, style)
+    style.layout(
+        "Icon.TMenubutton",
+        [
+            (
+                "Modern.button",
+                {
+                    "sticky": "nsew",
+                    "children": [
+                        (
+                            "Menubutton.padding",
+                            {
+                                "sticky": "nsew",
+                                "children": [("Menubutton.label", {"sticky": "nsew"})],
+                            },
+                        )
+                    ],
+                },
+            )
+        ],
+    )
 
 
 def _rounded_image(root: tk.Tk, fill: str, border: str, size: int = 20) -> tk.PhotoImage:
@@ -209,8 +233,12 @@ def _modern_surfaces(root: tk.Tk, style: ttk.Style) -> None:
             ],
         )
         style.map(
-            prefix + "TButton", foreground=[("disabled", "#8997a1"), ("!disabled", foreground)]
+            prefix + "TButton",
+            foreground=[("disabled", "#8997a1"), ("!disabled", foreground)],
+            # Clam's inherited state colors otherwise fill the transparent corners.
+            background=[("disabled", "white"), ("!disabled", "white")],
         )
+    style.map("TMenubutton", background=[("disabled", "white"), ("!disabled", "white")])
     style.layout(
         "TMenubutton",
         [

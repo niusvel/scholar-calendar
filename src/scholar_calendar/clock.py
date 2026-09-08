@@ -2,7 +2,7 @@
 
 from datetime import time
 
-DEFAULT_CLASS_START = time(8, 30)
+DEFAULT_CLASS_START = time(7, 40)
 
 
 def minutes_since_midnight(value: time) -> int:

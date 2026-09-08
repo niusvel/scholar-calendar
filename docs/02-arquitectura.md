@@ -43,9 +43,13 @@ Todas las rutas de esta tabla están bajo `src/scholar_calendar/`.
 | `storage.py` | Escritura JSON mediante reemplazo atómico. |
 | `desktop.py` | Ventanas, formularios, edición de recursos y coordinación de acciones. |
 | `configuration_overview.py` | Resumen completo de configuración y acceso a editores. |
+| `schedule_updates.py` | Comparación de entradas de generación y aplicación segura de cambios de nombre. |
 | `schedule_grid.py` | Cuadrícula Canvas, desplazamiento y selección por asignatura. |
 | `subject_details.py` | Texto de las restricciones relevantes para una asignatura. |
 | `restriction_note.py` | Nota amarilla con borde discontinuo y desplazamiento interno. |
+| `rules_help.py` | Ventana de consulta de las reglas obligatorias, dinámicas y opcionales del motor. |
+| `rules_catalog.py` | Texto compartido por la ventana de reglas y su PDF, sin dependencia de Tkinter. |
+| `rules_pdf.py` | Exportación del catálogo completo de reglas en A4 vertical. |
 | `theme.py` | Estilos ttk, paleta y elementos gráficos de los controles. |
 | `pdf.py` | Exportación A4 horizontal con una página por día. |
 | `example.py` | Ejemplo de consola independiente de la interfaz. |
@@ -80,9 +84,11 @@ nuevas horas, nombres o restricciones. La cuadrícula, la nota y el PDF consulta
 3. Los callbacks actualizan listas, asociaciones, variables y reglas.
 4. `_apply_editor()` llama a `_sync_planning()`: lee campos, construye la nueva
    configuración y la valida. Si hay un error, mantiene abierto el editor.
-5. `_set_planning()` reconstruye controles y resumen a partir del modelo válido.
+5. `update_schedule_metadata()` aplica los renombrados registrados si no cambian
+   las entradas de generación. `_set_planning()` reconstruye controles y resumen.
 6. `_close_editor()` libera el foco, oculta el diálogo y restaura la semana del
-   horario. El horario generado permanece asociado a su configuración original.
+   horario. El horario permanece asociado a sus reglas originales; los cambios cosméticos
+   compatibles se reflejan también en esa configuración.
 
 Cancelar sigue el mismo cierre, pero primero restaura la copia inicial. Los
 nombres actúan como identificadores: `_update_resource_rules()` conserva los
@@ -105,6 +111,27 @@ representa un historial ni una suscripción al archivo.
 
 `_clear_project()` elimina el estado en memoria y vuelve a `default_planning()`.
 No borra archivos. Los detalles de persistencia están en [Formatos](04-formatos.md).
+
+## Actualización de nombres y estado del horario
+
+Cada diálogo registra los `ResourceRename` realizados, en orden. Solo se aplican
+al horario al confirmar, de modo que cancelar no altera sus nombres. El cambio
+incluye las clases, recursos, asociaciones y restricciones de su configuración.
+
+`generation_signature()` compara todos los datos que intervienen en la generación,
+excluyendo el título del curso. Normaliza orden de recursos y franjas, mapas
+vacíos, metadatos opcionales y días con cero turnos. Los nombres siguen formando
+parte de esa firma; solo se sustituyen con operaciones explícitas de renombrado.
+
+Si la configuración del horario, después de esos renombrados, coincide con la
+actual, `update_schedule_metadata()` actualiza sus textos sin resolver ni cambiar
+horas o asignaciones. Si no coincide, conserva el horario anterior. El título del
+curso, que no modifica la asignación, puede actualizarse en ambos casos.
+
+`_refresh_schedule_notice()` compara las configuraciones y muestra el aviso de
+regeneración en la ventana principal. Este estado se calcula al aplicar cambios,
+cargar, guardar, generar y mostrar el horario. No se persiste una bandera que
+pueda quedar desactualizada: se vuelve a comparar al cargar el documento.
 
 ## Conservación de horas importadas
 

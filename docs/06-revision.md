@@ -44,8 +44,9 @@ un sistema de persistencia externo ni una nueva dependencia de ejecución.
 El programa no tiene guardado automático, aviso de cambios pendientes,
 histórico, base de datos, calendario con fechas ni edición manual de celdas del
 horario. El solver trabaja en el hilo de la interfaz y no se puede cancelar desde
-la ventana. No hay un criterio de optimización pedagógica ni garantía de solución
-idéntica entre ejecuciones.
+la ventana. No hay una optimización pedagógica general ni garantía de solución idéntica
+entre ejecuciones. El motor sí incorpora las dos preferencias descritas en
+[Planificación](03-planificacion.md).
 
 Los nombres siguen siendo los identificadores de recursos. El modelo y el JSON
 admiten nombres de aula con comas, pero el campo de asociaciones utiliza comas
@@ -59,3 +60,12 @@ configuración incompletos se pueden guardar; su viabilidad se decide al generar
 La versión declarada es `0.1.0`. Las dependencias tienen versiones mínimas, no un
 bloqueo completo de versiones. Las comprobaciones gráficas se han hecho en macOS;
 no constituyen una certificación de portabilidad a todos los escritorios.
+
+## Ampliación posterior: preferencias y cambios cosméticos
+
+El motor incorpora preferencias de distribución fuera de 5.º–6.º y de dobles
+sin merienda intermedia. Los cambios exclusivos de nombres pueden actualizarse
+en el horario sin resolver, mientras que los cambios de generación muestran un
+aviso persistente. Estas funciones se verificaron con **95 pruebas superadas**,
+incluidos casos donde incumplir una preferencia es inevitable y documentos que
+siguen pendientes de regenerar después de guardarse y cargarse.

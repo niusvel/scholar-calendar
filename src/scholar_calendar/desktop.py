@@ -15,7 +15,9 @@ from .defaults import default_planning
 from .models import Classroom, PlanningInput, Subject, Teacher, build_daily_periods, build_slots
 from .project_file import CalendarProject, load_project, save_project
 from .restriction_note import RestrictionNote
+from .rules_help import RulesHelp
 from .schedule_grid import GridRow, ScheduleGrid
+from .schedule_updates import ResourceRename, requires_regeneration, update_schedule_metadata
 from .solver import Schedule, ScheduleError, solve
 from .subject_details import subject_restrictions
 from .theme import INK, PALE_TEAL, PAPER, TEAL, configure_styles
@@ -81,6 +83,9 @@ class CalendarApp(tk.Tk):
         self._loaded_clock_signature = None
         self._clock_preview_job = None
         self._editor_snapshot = None
+        self._editor_renames: list[ResourceRename] = []
+        self.schedule_needs_regeneration = False
+        self.rules_window: RulesHelp | None = None
         configure_styles(self)
         self._build_ui()
         self.bind("<Escape>", lambda _event: self._select_schedule_subject(None))
@@ -109,6 +114,8 @@ class CalendarApp(tk.Tk):
     def _build_ui(self) -> None:
         header = ttk.Frame(self, style="Header.TFrame", padding=(24, 16))
         header.pack(fill=tk.X)
+        self._header = header
+        self._build_file_menu(header)
         brand = ttk.Frame(header, style="Header.TFrame")
         brand.pack(side=tk.LEFT)
         ttk.Label(brand, text="Scholar Calendar", style="Title.TLabel").pack(anchor=tk.W)
@@ -119,11 +126,25 @@ class CalendarApp(tk.Tk):
         ).pack(anchor=tk.W, pady=(5, 0))
         toolbar = ttk.Frame(header, style="Header.TFrame")
         toolbar.pack(side=tk.RIGHT)
-        self._build_file_menu(toolbar)
         self.generate_button = ttk.Button(
             toolbar, text="Generar horario", style="Accent.TButton", command=self._generate
         )
         self.generate_button.pack(side=tk.RIGHT, padx=(12, 0))
+        self.export_button = ttk.Button(
+            toolbar, text="Exportar PDF", command=self._export_pdf, state="disabled"
+        )
+        self.export_button.pack(side=tk.RIGHT, padx=(12, 0))
+        self.schedule_notice = ttk.Frame(self, style="Warning.TFrame", padding=(14, 6))
+        notice = ttk.Label(
+            self.schedule_notice,
+            text="La configuración ha cambiado: debes generar un nuevo horario.",
+            style="Warning.TLabel",
+            wraplength=900,
+        )
+        notice.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.schedule_notice.bind(
+            "<Configure>", lambda event: notice.configure(wraplength=max(200, event.width - 28))
+        )
         ttk.Label(self, textvariable=self.status_var, style="Status.TLabel", padding=(24, 10)).pack(
             side=tk.BOTTOM, fill=tk.X
         )
@@ -188,6 +209,7 @@ class CalendarApp(tk.Tk):
         if self.planning is None or self._editor_snapshot is not None:
             return
         self._editor_snapshot = deepcopy(self.planning)
+        self._editor_renames = []
         self._editor_schedule_week = self.week_var.get()
         self._editor_section = section
         titles = {
@@ -231,10 +253,20 @@ class CalendarApp(tk.Tk):
         except (TypeError, ValueError, tk.TclError) as error:
             messagebox.showerror("Revisa la configuración", str(error), parent=self.editor_window)
             return
+        self._update_schedule_metadata(planning, tuple(self._editor_renames))
         self._set_planning(planning)
         self._close_editor()
+        self._refresh_schedule_notice()
+        if self.schedule is not None:
+            vertical_position = self.table.body.yview()[0]
+            self._render()
+            self.table.body.yview_moveto(vertical_position)
         self.status_var.set(
-            "Configuración actualizada. Guarda el archivo para conservarla o genera el horario."
+            "Debes generar un nuevo horario para aplicar los cambios."
+            if self.schedule_needs_regeneration
+            else "Cambios aplicados al horario existente. Guarda el archivo para conservarlos."
+            if self.schedule is not None
+            else "Configuración actualizada. Guarda el archivo para conservarla o genera el horario."
         )
 
     def _cancel_editor(self, _event=None) -> str:
@@ -250,6 +282,7 @@ class CalendarApp(tk.Tk):
                 str(week) for week in range(1, self.schedule_planning.weeks + 1)
             ]
         self._editor_snapshot = None
+        self._editor_renames = []
         self.editor_window.grab_release()
         self.editor_window.withdraw()
         self._update_file_menu()
@@ -276,7 +309,7 @@ class CalendarApp(tk.Tk):
         else:
             canvas = self._scroll_canvases.get(self.notebook.select())
         if canvas is None or isinstance(
-            event.widget, (ttk.Treeview, tk.Listbox, ttk.Combobox, ttk.Spinbox)
+            event.widget, (ttk.Treeview, tk.Listbox, tk.Text, ttk.Combobox, ttk.Spinbox)
         ):
             return
         if getattr(event, "num", None) == 4:
@@ -920,26 +953,73 @@ class CalendarApp(tk.Tk):
         self.file_menu.add_command(label="Guardar", command=self._save, accelerator="⌘S")
         self.file_menu.add_command(label="Cargar", command=self._open, accelerator="⌘O")
         self.file_menu.add_separator()
-        self.file_menu.add_command(label="Exportar PDF", command=self._export_pdf, state="disabled")
-        self.file_menu.add_separator()
         self.file_menu.add_command(label="Limpiar", command=self._clear_project)
         self.file_menu.add_separator()
+        self.file_menu.add_command(label="Reglas de generación", command=self._show_rules)
+        self.file_menu.add_separator()
         self.file_menu.add_command(label="Salir", command=self._exit, accelerator="⌘Q")
-        menubar.add_cascade(label="Archivo", menu=self.file_menu)
+        menubar.add_cascade(label="Menú", menu=self.file_menu)
         self.configure(menu=menubar)
-        ttk.Menubutton(toolbar, text="Archivo", menu=self.file_menu).pack(side=tk.LEFT)
+        self._menu_icon = tk.PhotoImage(master=self, width=20, height=20)
+        for y in (4, 9, 14):
+            self._menu_icon.put(INK, to=(2, y, 18, y + 2))
+        self.menu_button = ttk.Menubutton(
+            toolbar,
+            text="Menú",
+            image=self._menu_icon,
+            style="Icon.TMenubutton",
+            menu=self.file_menu,
+            takefocus=True,
+        )
+        self.menu_button.pack(side=tk.LEFT, padx=(0, 18))
         self.protocol("WM_DELETE_WINDOW", self._exit)
         for key, command in (("s", self._save), ("o", self._open), ("q", self._exit)):
             self.bind(f"<Command-{key}>", lambda _event, command=command: command())
 
     def _update_file_menu(self) -> None:
         editing = self._editor_snapshot is not None
-        for label in ("Guardar", "Cargar", "Limpiar", "Salir"):
+        for label in ("Guardar", "Cargar", "Limpiar", "Reglas de generación", "Salir"):
             self.file_menu.entryconfigure(label, state="disabled" if editing else "normal")
-        self.file_menu.entryconfigure(
-            "Exportar PDF",
+        self.export_button.configure(
             state="normal" if self.schedule is not None and not editing else "disabled",
         )
+
+    def _show_rules(self) -> None:
+        if self._editor_snapshot is not None:
+            return
+        if self.rules_window is None or not self.rules_window.winfo_exists():
+            self.rules_window = RulesHelp(self)
+        self.rules_window.deiconify()
+        self.rules_window.lift()
+        self.rules_window.focus_set()
+
+    def _refresh_schedule_notice(self) -> None:
+        self.schedule_needs_regeneration = (
+            self.schedule is not None
+            and self.schedule_planning is not None
+            and self.planning is not None
+            and requires_regeneration(self.planning, self.schedule_planning)
+        )
+        if self.schedule_needs_regeneration:
+            self.generate_button.configure(text="Generar de nuevo")
+            self.schedule_notice.pack(after=self._header, fill=tk.X, padx=24, pady=(10, 0))
+        else:
+            self.generate_button.configure(text="Generar horario")
+            self.schedule_notice.pack_forget()
+
+    def _update_schedule_metadata(
+        self, planning: PlanningInput, renames: tuple[ResourceRename, ...] = ()
+    ) -> None:
+        if self.schedule is None or self.schedule_planning is None:
+            return
+        self.schedule_planning, updated = update_schedule_metadata(
+            planning, self.schedule_planning, self.schedule, renames
+        )
+        if not requires_regeneration(planning, self.schedule_planning):
+            for rename in renames:
+                if rename.kind == "subject" and self.selected_subject == rename.before:
+                    self.selected_subject = rename.after
+        self.schedule = updated
 
     def _open(self) -> None:
         if self._editor_snapshot is not None:
@@ -961,6 +1041,7 @@ class CalendarApp(tk.Tk):
         self._set_planning(project.planning)
         self.schedule = project.schedule
         self.schedule_planning = project.schedule_planning
+        self._update_schedule_metadata(project.planning)
         self.document_path = path
         self.selected_subject = None
         self._clear_table()
@@ -970,6 +1051,7 @@ class CalendarApp(tk.Tk):
         else:
             self.notebook.select(self.setup_tab)
         self._update_file_menu()
+        self._refresh_schedule_notice()
         self.status_var.set(
             f"Cargado: {path.name}"
             + (
@@ -992,7 +1074,11 @@ class CalendarApp(tk.Tk):
         self._scroll_canvases[str(self.setup_tab)].yview_moveto(0)
         self.notebook.select(self.setup_tab)
         self._update_file_menu()
-        self.status_var.set("Centro limpio. Configuración por defecto con inicio a las 08:30.")
+        self._refresh_schedule_notice()
+        self.status_var.set(
+            "Centro limpio. Configuración por defecto con inicio a las "
+            f"{DEFAULT_CLASS_START:%H:%M}."
+        )
 
     def _reset_editor_inputs(self) -> None:
         for variable in (
@@ -1251,8 +1337,12 @@ class CalendarApp(tk.Tk):
         )
         if path:
             try:
+                self._update_schedule_metadata(planning)
                 save_project(CalendarProject(planning, self.schedule_planning, self.schedule), path)
                 self.planning = planning
+                self._refresh_schedule_notice()
+                if self.schedule is not None:
+                    self._render()
                 self.document_path = Path(path)
                 self.status_var.set(
                     f"Guardado: {Path(path).name}"
@@ -1280,6 +1370,7 @@ class CalendarApp(tk.Tk):
             self.update_idletasks()
             self.schedule = solve(self.planning)
             self.schedule_planning = self.planning
+            self._refresh_schedule_notice()
             self.selected_subject = None
             self._update_file_menu()
             self.week_var.set("1")
@@ -1289,6 +1380,7 @@ class CalendarApp(tk.Tk):
             self.notebook.select(self.schedule_tab)
             self.status_var.set(f"Horario generado: {len(self.schedule.lessons)} sesiones")
         except (ScheduleError, TypeError, ValueError, tk.TclError) as error:
+            self._refresh_schedule_notice()
             self.status_var.set(
                 "No se pudo generar el horario. Revisa la configuración y las restricciones."
             )
@@ -1338,6 +1430,7 @@ class CalendarApp(tk.Tk):
                 subjects.remove(old_name)
                 subjects.add(new_name)
         self._update_resource_rules("subject", old_name, new_name)
+        self._editor_renames.append(ResourceRename("subject", old_name, new_name))
         self.subject_name_var.set("")
         self._refresh_editors()
 
@@ -1377,6 +1470,7 @@ class CalendarApp(tk.Tk):
         self.teacher_subjects[new_name] = self.teacher_subjects.pop(old_name, set())
         self.teacher_classrooms[new_name] = self.teacher_classrooms.pop(old_name, set())
         self._update_resource_rules("teacher", old_name, new_name)
+        self._editor_renames.append(ResourceRename("teacher", old_name, new_name))
         self.teacher_name_var.set("")
         self._refresh_editors()
 
@@ -1404,6 +1498,7 @@ class CalendarApp(tk.Tk):
             return
         self.classroom_list.delete(index)
         self.classroom_list.insert(index, new_name)
+        self._editor_renames.append(ResourceRename("classroom", old_name, new_name))
         for classrooms in self.teacher_classrooms.values():
             if old_name in classrooms:
                 classrooms.remove(old_name)
@@ -1726,6 +1821,7 @@ class CalendarApp(tk.Tk):
         self._update_file_menu()
 
     def _render(self) -> None:
+        self._refresh_schedule_notice()
         planning = self.schedule_planning
         if planning is None or self.schedule is None:
             return

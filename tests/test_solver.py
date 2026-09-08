@@ -253,3 +253,80 @@ def test_timeout_is_not_reported_as_proven_infeasibility():
         pytest.raises(ScheduleError, match="no se ha demostrado"),
     ):
         solve(load_planning("examples/cycle.json"))
+
+
+def test_subjects_prefer_at_least_one_session_outside_periods_five_and_six():
+    from collections import defaultdict
+    from dataclasses import replace
+
+    slots = build_slots(
+        weeks=2,
+        days=2,
+        daily_periods=((time(8), time(9)), (time(9), time(10)), (time(11), time(12))),
+    )
+    planning = PlanningInput(
+        weeks=2,
+        subjects=(Subject("A", 2), Subject("B", 2)),
+        teachers=(Teacher("Ana"), Teacher("Luis")),
+        classrooms=(Classroom("1"), Classroom("2")),
+        slots=tuple(replace(slot, period=slot.period + 3) for slot in slots),
+        teacher_subjects={"Ana": frozenset({"A", "B"}), "Luis": frozenset({"A", "B"})},
+        teacher_classrooms={},
+    )
+    by_subject = defaultdict(list)
+    for lesson in solve(planning).lessons:
+        by_subject[lesson.week, lesson.classroom, lesson.subject].append(lesson.period)
+    assert len(by_subject) == 8
+    assert all(len(periods) == 2 and 4 in periods for periods in by_subject.values())
+
+
+def test_late_period_preference_does_not_make_a_possible_schedule_impossible():
+    from dataclasses import replace
+
+    slots = build_slots(weeks=1, days=2, daily_periods=((time(12), time(12, 45)),))
+    planning = PlanningInput(
+        weeks=1,
+        subjects=(Subject("A", 2),),
+        teachers=(Teacher("Ana"),),
+        classrooms=(Classroom("1"),),
+        slots=tuple(replace(slot, period=5) for slot in slots),
+        teacher_subjects={"Ana": frozenset({"A"})},
+        teacher_classrooms={},
+    )
+    assert [lesson.period for lesson in solve(planning).lessons] == [5, 5]
+
+
+def test_double_period_prefers_to_avoid_the_actual_snack_interval():
+    from scholar_calendar.models import build_daily_periods
+
+    periods = build_daily_periods(
+        start=time(8, 30), period_count=3, break_start=time(9, 15), break_end=time(9, 35)
+    )
+    planning = PlanningInput(
+        weeks=1,
+        subjects=(Subject("A", 2, True),),
+        teachers=(Teacher("Ana"),),
+        classrooms=(Classroom("1"),),
+        slots=build_slots(weeks=1, days=1, daily_periods=periods),
+        teacher_subjects={"Ana": frozenset({"A"})},
+        teacher_classrooms={},
+        break_start=time(9, 15),
+        break_end=time(9, 35),
+    )
+    assert [lesson.period for lesson in solve(planning).lessons] == [2, 3]
+
+
+def test_double_period_can_cross_snack_when_there_is_no_alternative():
+    from scholar_calendar.models import build_daily_periods
+
+    slots = build_slots(weeks=1, days=1, daily_periods=build_daily_periods(period_count=3))
+    planning = PlanningInput(
+        weeks=1,
+        subjects=(Subject("A", 2, True),),
+        teachers=(Teacher("Ana"),),
+        classrooms=(Classroom("1"),),
+        slots=slots[1:],
+        teacher_subjects={"Ana": frozenset({"A"})},
+        teacher_classrooms={},
+    )
+    assert [lesson.period for lesson in solve(planning).lessons] == [2, 3]

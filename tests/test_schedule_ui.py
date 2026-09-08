@@ -106,17 +106,17 @@ def test_ui_saves_generated_snapshot_and_loads_without_solving(app, tmp_path):
     with patch("scholar_calendar.desktop.solve", side_effect=AssertionError("Must not solve")):
         app._load(path)
     assert app.schedule == generated_schedule
-    assert app.schedule_planning == generated_planning
+    assert app.schedule_planning == replace(generated_planning, course_name="Configuración editada")
     assert app.course_var.get() == "Configuración editada"
     assert app.week_var.get() == "1"
-    assert app.file_menu.entrycget("Exportar PDF", "state") == "normal"
+    assert app.export_button.instate(["!disabled"])
     click_cell(app, "Matemáticas")
     assert app.selected_subject == "Matemáticas"
     with patch(
         "scholar_calendar.desktop.filedialog.asksaveasfilename",
         return_value=str(tmp_path / "loaded.pdf"),
     ):
-        app._export_pdf()
+        app.export_button.invoke()
     assert (tmp_path / "loaded.pdf").read_bytes().startswith(b"%PDF-")
 
 
@@ -264,11 +264,12 @@ def test_modal_is_centered_on_screen_and_file_actions_are_disabled(app):
     dialog = app.editor_window
     assert abs(dialog.winfo_x() - (app.winfo_screenwidth() - dialog.winfo_width()) / 2) <= 2
     assert abs(dialog.winfo_y() - (app.winfo_screenheight() - dialog.winfo_height()) / 2) <= 2
-    for action in ("Guardar", "Cargar", "Exportar PDF", "Limpiar", "Salir"):
+    assert app.export_button.instate(["disabled"])
+    for action in ("Guardar", "Cargar", "Limpiar", "Reglas de generación", "Salir"):
         assert app.file_menu.entrycget(action, "state") == "disabled"
     app._cancel_editor()
     assert app.file_menu.entrycget("Guardar", "state") == "normal"
-    assert app.file_menu.entrycget("Exportar PDF", "state") == "normal"
+    assert app.export_button.instate(["!disabled"])
 
 
 def test_file_menu_clears_everything_and_reloads_saved_document(app, tmp_path):
@@ -294,19 +295,19 @@ def test_file_menu_clears_everything_and_reloads_saved_document(app, tmp_path):
     assert not app.restriction_note.winfo_ismapped()
     assert not app.subject_name_var.get() and not app.subject_double_var.get()
     assert not any(variable.get() for variable in app.unavailable_day_vars.values())
-    assert app.class_start_var.get() == "08:30"
+    assert app.class_start_var.get() == "07:40"
     assert app.notebook.select() == str(app.setup_tab)
-    assert app.file_menu.entrycget("Exportar PDF", "state") == "disabled"
+    assert app.export_button.instate(["disabled"])
     assert path.read_bytes() == original
     tree = app.overview.period_tree
     rows = [tree.item(item, "values") for item in tree.get_children()]
-    assert rows[0][1:] == ("08:30 – 09:15", "45 min")
+    assert rows[0][1:] == ("07:40 – 08:25", "45 min")
     assert any(row[1:] == ("09:20 – 10:05", "45 min") for row in rows)
     assert any(row[0] == "Merienda" and row[1] == "10:05 – 10:25" for row in rows)
     with patch("scholar_calendar.desktop.filedialog.askopenfilename", return_value=str(path)):
         app.file_menu.invoke("Cargar")
     assert app.schedule == schedule
-    assert app.file_menu.entrycget("Exportar PDF", "state") == "normal"
+    assert app.export_button.instate(["!disabled"])
 
 
 def test_resource_renames_and_deletion_keep_restrictions_consistent(app):
@@ -385,3 +386,131 @@ def test_unrestricted_teachers_and_irregular_slots_survive_saving(app, tmp_path)
     assert restored.slots == planning.slots
     assert restored.classrooms == planning.classrooms
     assert restored.teacher_classrooms == {}
+
+
+def test_loaded_schedule_receives_cosmetic_edits_without_solving(app, tmp_path):
+    from scholar_calendar.project_file import CalendarProject, load_project, save_project
+
+    path = tmp_path / "renamed.json"
+    original = app.schedule
+    save_project(CalendarProject(app.planning, app.schedule_planning, app.schedule), path)
+    with patch("scholar_calendar.desktop.solve", side_effect=AssertionError("Must not regenerate")):
+        app._load(path)
+        click_cell(app, "Matemáticas")
+        app._change_week(1)
+        app._open_editor("subjects")
+        app.subject_tree.selection_set(app.subject_tree.get_children()[0])
+        app._select_subject(None)
+        app.subject_name_var.set("Álgebra")
+        app._edit_subject()
+        app._apply_editor()
+        app.update()
+        assert app.selected_subject == "Álgebra"
+        assert app.week_var.get() == "2"
+        assert "Álgebra" in app.restriction_note.content.get("1.0", "end-1c")
+        app._open_editor("teachers")
+        app.teacher_list.selection_set(0)
+        app.teacher_name_var.set("Ana María")
+        app._edit_teacher()
+        app._apply_editor()
+        app._open_editor("classrooms")
+        app.classroom_list.selection_set(0)
+        app.classroom_name_var.set("Grupo A")
+        app._edit_classroom()
+        app._apply_editor()
+        app._open_editor("clock")
+        app.course_var.set("Curso actualizado")
+        app._apply_editor()
+        assert not app.schedule_needs_regeneration
+        assert not app.schedule_notice.winfo_ismapped()
+        expected = tuple(
+            replace(
+                lesson,
+                subject="Álgebra" if lesson.subject == "Matemáticas" else lesson.subject,
+                teacher="Ana María" if lesson.teacher == "Ana" else lesson.teacher,
+                classroom="Grupo A" if lesson.classroom == "Aula 1" else lesson.classroom,
+            )
+            for lesson in original.lessons
+        )
+        assert app.schedule.lessons == expected
+        with patch("scholar_calendar.desktop.filedialog.asksaveasfilename", return_value=str(path)):
+            app._save()
+        assert load_project(path).schedule.lessons == expected
+        app._load(path)
+        assert app.schedule.lessons == expected
+        assert not app.schedule_needs_regeneration
+        with (
+            patch(
+                "scholar_calendar.desktop.filedialog.asksaveasfilename",
+                return_value=str(tmp_path / "renamed.pdf"),
+            ),
+            patch("scholar_calendar.pdf.export_schedule_pdf") as export,
+        ):
+            app.export_button.invoke()
+        assert export.call_args.args[0].course_name == "Curso actualizado"
+        assert export.call_args.args[1].lessons == expected
+
+
+def test_cancel_preserves_names_and_stale_warning_survives_save_load_and_failed_generation(
+    app, tmp_path
+):
+    from scholar_calendar.solver import ScheduleError
+
+    original = app.schedule
+    app._open_editor("subjects")
+    app.subject_tree.selection_set(app.subject_tree.get_children()[0])
+    app._select_subject(None)
+    app.subject_name_var.set("Nombre descartado")
+    app._edit_subject()
+    app._cancel_editor()
+    assert app.schedule is original
+    assert not app.schedule_needs_regeneration
+    app._open_editor("subjects")
+    app.subject_tree.selection_set(app.subject_tree.get_children()[0])
+    app._select_subject(None)
+    app.subject_lessons_var.set(2)
+    app._edit_subject()
+    app._apply_editor()
+    app.update()
+    assert app.schedule_needs_regeneration
+    assert app.schedule_notice.winfo_ismapped()
+    assert app.schedule is original
+    path = tmp_path / "stale.json"
+    with patch("scholar_calendar.desktop.filedialog.asksaveasfilename", return_value=str(path)):
+        app._save()
+    app._load(path)
+    app.update()
+    assert app.schedule_needs_regeneration and app.schedule_notice.winfo_ismapped()
+    with (
+        patch("scholar_calendar.desktop.solve", side_effect=ScheduleError("No cabe")),
+        patch("scholar_calendar.desktop.messagebox.showerror"),
+    ):
+        app._generate()
+    assert app.schedule_needs_regeneration
+    assert app.schedule == original
+    app._open_editor("subjects")
+    app.subject_tree.selection_set(app.subject_tree.get_children()[0])
+    app._select_subject(None)
+    app.subject_lessons_var.set(1)
+    app._edit_subject()
+    app._apply_editor()
+    app.update()
+    assert not app.schedule_needs_regeneration and not app.schedule_notice.winfo_ismapped()
+
+
+def test_mixed_rename_and_generation_change_requires_new_schedule(app):
+    original = app.schedule
+    app._open_editor("subjects")
+    app.subject_tree.selection_set(app.subject_tree.get_children()[0])
+    app._select_subject(None)
+    app.subject_name_var.set("Álgebra")
+    app.subject_lessons_var.set(2)
+    app._edit_subject()
+    app._apply_editor()
+    assert app.schedule_needs_regeneration
+    assert app.schedule is original
+    with patch("scholar_calendar.desktop.solve", return_value=Schedule(())) as generate:
+        app._generate()
+    generate.assert_called_once()
+    assert not app.schedule_needs_regeneration
+    assert app.schedule_planning == app.planning

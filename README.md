@@ -28,7 +28,7 @@ python3 -m venv .venv
 .venv/bin/scholar-calendar
 ```
 
-La aplicación empieza con un centro vacío. Para probarla, elige **Archivo → Cargar**,
+La aplicación empieza con un centro vacío. Para probarla, elige **Menú ☰ → Cargar**,
 abre [examples/minimal.json](examples/minimal.json) y pulsa **Generar horario**.
 El ejemplo contiene una semana, un grupo, dos profesores y cinco sesiones.
 
@@ -39,14 +39,16 @@ El ejemplo contiene una semana, un grupo, dos profesores y cinco sesiones.
 3. Genera el horario y consulta su distribución por semanas.
 4. Guarda el documento y exporta el PDF cuando lo necesites.
 
-La jornada por defecto empieza a las **08:30**, con clases de **45 minutos** y
+La jornada por defecto empieza a las **07:40**, con clases de **45 minutos** y
 cambios de **5 minutos**. La **merienda** es de **10:05 a 10:25** y la **comida**,
 de **13:40 a 15:00**. El ciclo inicial tiene una semana, seis turnos diarios de
 lunes a viernes y ningún sábado activo.
 
 **Guardar** conserva la configuración actual y el horario generado, si lo hay,
-en un único JSON. Si editas después de generar, conserva también la configuración
-con la que se calculó ese horario. **Cargar** lo recupera sin recalcular.
+en un único JSON. Los cambios de nombre de asignaturas, profesores o aulas se
+reflejan en el horario existente si no se cambia su configuración de generación.
+Los cambios de restricciones muestran un aviso persistente para generar un nuevo
+horario. **Cargar** lo recupera sin recalcular.
 **Limpiar** vacía la ventana y restablece los valores iniciales; no elimina archivos.
 
 ## Documentación, de lo general a lo detallado
@@ -80,6 +82,7 @@ Las pruebas de interfaz se omiten normalmente. En una sesión de escritorio:
 SCHOLAR_CALENDAR_GUI_TESTS=1 .venv/bin/python -m pytest
 ```
 
-No hay guardado automático ni histórico automático. La generación busca una
-solución válida, no una distribución pedagógica óptima ni reproducible entre
-ejecuciones. Estos límites se explican en la documentación técnica.
+No hay guardado automático ni histórico automático. La generación respeta las reglas obligatorias e intenta que ninguna asignatura
+quede siempre en los turnos 5.º–6.º y que la merienda no parta un doble. Estas
+preferencias pueden ceder cuando no hay alternativa; la solución no tiene por qué
+ser idéntica entre ejecuciones. Estos límites se explican en la documentación técnica.

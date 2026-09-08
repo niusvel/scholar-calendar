@@ -2,6 +2,10 @@
 
 [← Arquitectura](02-arquitectura.md) · [Inicio](../README.md) · [Formatos →](04-formatos.md)
 
+La aplicación ofrece esta explicación resumida en **Menú ☰ → Reglas de generación**,
+con pestañas para reglas obligatorias, dinámicas y opcionales. Las dinámicas
+dependen de la configuración y son obligatorias cuando resultan aplicables.
+
 ## Unidades del modelo
 
 - **Ciclo:** entre 1 y 52 semanas numeradas desde 1.
@@ -25,22 +29,24 @@ Con los valores iniciales:
 
 | Actividad | Intervalo |
 | --- | --- |
-| Turno 1 | 08:30–09:15 |
+| Turno 1 | 07:40–08:25 |
+| Cambio | 08:25–08:30 |
+| Turno 2 | 08:30–09:15 |
 | Cambio | 09:15–09:20 |
-| Turno 2 | 09:20–10:05 |
+| Turno 3 | 09:20–10:05 |
 | Merienda | 10:05–10:25 |
-| Turno 3 | 10:25–11:10 |
+| Turno 4 | 10:25–11:10 |
 | Cambio | 11:10–11:15 |
-| Turno 4 | 11:15–12:00 |
+| Turno 5 | 11:15–12:00 |
 | Cambio | 12:00–12:05 |
-| Turno 5 | 12:05–12:50 |
-| Cambio | 12:50–12:55 |
-| Turno 6 | 12:55–13:40 |
+| Turno 6 | 12:05–12:50 |
+| Cambio, si continúa la jornada | 12:50–12:55 |
+| Tiempo libre, si continúa la jornada | 12:55–13:40 |
 | Comida, si continúa la jornada | 13:40–15:00 |
 | Turno 7, si se configura | 15:00–15:45 |
 
 El cambio puede quedar absorbido por una pausa. Por ejemplo, no se añaden otros
-cinco minutos después de la merienda que sigue al turno 2. La comida tiene
+cinco minutos después de la merienda que sigue al turno 3. La comida tiene
 además `lunch_after_period`: el turno siguiente al indicado no puede empezar antes
 de `lunch_end`. El cálculo usa el máximo con la hora actual, por lo que no hace
 retroceder el reloj si las clases ya van más tarde.
@@ -94,7 +100,8 @@ Una asignatura marcada como doble:
 Así, una frecuencia de 4 produce dos parejas; una de 5 produce dos parejas y una
 sesión suelta. La consecutividad se basa en el número de turno dentro de la misma
 semana y día, **no** en que el final de una clase coincida con el inicio de la
-siguiente. Una pareja puede quedar a ambos lados de la merienda o la comida.
+siguiente. Una pareja puede quedar a ambos lados de una pausa, aunque una preferencia
+penaliza específicamente las parejas que atraviesan la merienda.
 
 ## Bloqueos e incompatibilidades
 
@@ -113,6 +120,27 @@ impartir simultáneamente una sola de ellas. Por ejemplo, si A y B son incompati
 A puede ocupar Aula 1 y Aula 2 a la vez con profesores distintos, siempre que B
 no aparezca en ese turno.
 
+## Preferencias no obligatorias
+
+Se minimizan dos tipos de incumplimientos, con peso 1 cada uno:
+
+| Preferencia | Qué se penaliza |
+| --- | --- |
+| Distribución fuera de 5.º–6.º | Una penalización por asignatura, aula y semana si tiene frecuencia positiva y todas sus sesiones quedan en los turnos 5 o 6. |
+| Dobles sin merienda intermedia | Una penalización por pareja doble que termina su primera sesión antes o al inicio de la merienda y empieza la segunda al final o después de ella. |
+
+La primera se satisface con al menos una sesión fuera de esos dos turnos; no
+pretende minimizar todas las clases a última hora. Una asignatura con una sola
+sesión semanal también intenta evitar esos turnos. La segunda usa los extremos
+configurados de la merienda; si la pausa está desactivada, no hay penalización.
+No se aplica la misma preferencia a la comida.
+
+Se minimiza la suma de ambas penalizaciones, sin prioridad entre ellas. Si se
+pueden satisfacer todas, el objetivo vale cero. Si no, se acepta una solución
+con incumplimientos de preferencias que siga respetando todas las reglas duras.
+El límite de búsqueda puede impedir demostrar que la solución encontrada sea
+la mejor posible.
+
 ## Formulación CP-SAT
 
 `solve()` valida primero la estructura de `PlanningInput`. A continuación crea:
@@ -130,9 +158,10 @@ semana para construir las restricciones sin recorrer todos los candidatos cada
 vez. Las franjas de cada día se ordenan por turno antes de buscar adyacencias,
 por lo que el orden de almacenamiento no cambia las reglas de dobles turnos.
 
-Todas las reglas descritas son obligatorias. No existe función objetivo:
-las restricciones de dobles ya fijan el número de parejas necesario y no requieren
-una maximización adicional.
+Las reglas de viabilidad siguen siendo obligatorias. Las restricciones de dobles
+fijan el número de parejas necesario. Para las preferencias se añaden indicadores
+de semanas sin sesiones fuera de 5.º–6.º y se reutilizan las variables de parejas
+que atraviesan la merienda; la función objetivo minimiza su suma.
 
 El solver dispone de **10 segundos** y **8 workers**. Se aceptan los estados
 `OPTIMAL` y `FEASIBLE`. `UNKNOWN` produce un mensaje de tiempo agotado sin afirmar

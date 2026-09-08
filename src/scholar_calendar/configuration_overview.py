@@ -109,6 +109,15 @@ def configuration_sections(planning: PlanningInput) -> dict[str, tuple[tuple[str
             ("No consecutivas", planning.forbidden_consecutive),
             ("No simultáneas", planning.forbidden_parallel),
         )
+    ) + (
+        (
+            "Preferencia de distribución",
+            "Intentar que cada asignatura tenga alguna sesión fuera de los turnos 5.º y 6.º, por aula y semana.",
+        ),
+        (
+            "Preferencia en dobles",
+            "Intentar que la merienda no quede entre los dos turnos. Estas preferencias pueden ceder ante las reglas obligatorias.",
+        ),
     )
     return {
         "clock": clock,

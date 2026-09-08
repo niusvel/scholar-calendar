@@ -4,7 +4,7 @@
 
 ## Formato recomendado: documento del centro
 
-**Archivo → Guardar** utiliza un JSON UTF-8 con esta estructura:
+**Menú ☰ → Guardar** utiliza un JSON UTF-8 con esta estructura:
 
 ```json
 {
@@ -27,7 +27,7 @@ carga [el ejemplo mínimo](../examples/minimal.json) y guárdalo desde la aplica
 | `generated` | `null` si no hay horario; en otro caso, un objeto `scholar-calendar-schedule`. |
 
 El bloque `generated` incluye su propia configuración. Puede diferir de
-`configuration`: por ejemplo, el centro puede haberse renombrado después de
+`configuration`: por ejemplo, puede haberse cambiado la frecuencia de una asignatura después de
 generar. La duplicación permite conservar tanto los cambios pendientes de
 regeneración como el horario que se está consultando.
 
@@ -78,7 +78,7 @@ domingo en un día válido para bloqueos o franjas.
 
 | Campo | Tipo | Valor inicial o inferencia |
 | --- | --- | --- |
-| `start` | Hora `HH:MM`. | Inicio del primer intervalo explícito, o `08:30`. |
+| `start` | Hora `HH:MM`. | Inicio del primer intervalo explícito, o `07:40`. |
 | `periods_per_day` | Número de intervalos que construir si faltan. | 6. |
 | `period_minutes` | Duración positiva. | Duración del primer intervalo explícito, o 45. |
 | `transition_minutes` | Minutos no negativos. | Menor separación entre intervalos explícitos, o 5. |
@@ -178,6 +178,17 @@ archivos antiguos. No existe migración automática al abrir; el nuevo formato s
 escribe al guardar desde la aplicación. Una versión anterior del programa puede
 ignorar el campo adicional `slots` de la configuración y no conservar ciclos
 irregulares; utiliza la versión actual para esos documentos.
+
+## Cambios cosméticos y preferencias
+
+Los renombrados confirmados sin cambios de generación actualizan los nombres de
+las clases y de la configuración del horario antes de guardar. No modifican sus
+franjas. Los documentos pendientes de regenerar conservan ambas configuraciones;
+la diferencia entre ellas permite recuperar el aviso al cargar.
+
+Las preferencias de turnos 5.º–6.º y dobles sin merienda son criterios fijos del
+motor actual. No añaden campos obligatorios ni cambian la versión de archivo.
+Cargar un horario antiguo no lo reorganiza para cumplirlas.
 
 ## Validación y escritura
 
