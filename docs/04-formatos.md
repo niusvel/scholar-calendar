@@ -44,6 +44,7 @@ de configuración sin `type`.
 | `classrooms` | Lista de objetos con `name`. | Obligatorio; puede estar vacía. |
 | `teacher_subjects` | Objeto profesor → lista de asignaturas habilitadas. | Obligatorio; `{}` es válido. |
 | `teacher_classrooms` | Objeto profesor → lista de aulas permitidas. | Obligatorio; `{}` permite todas las aulas. |
+| `teacher_subject_classrooms` | Objeto profesor → asignatura → lista de aulas permitidas para esa pareja. | `{}`; no añade límites a los generales. |
 | `course_name` | Texto identificativo del curso. | Cadena vacía. |
 | `clock` | Parámetros del reloj. | Valores iniciales e inferencias descritos más abajo. |
 | `daily_periods` | Lista de objetos `start` / `end`, sin día ni semana. | Se calculan con `clock`. |
@@ -52,6 +53,7 @@ de configuración sin `type`.
 | `saturday_weeks` | Lista de semanas del ciclo con sábado activo. | `[]`. |
 | `teacher_unavailable_days` | Objeto profesor → lista de días bloqueados. | `{}`. |
 | `subject_unavailable_days` | Objeto asignatura → lista de días bloqueados. | `{}`. |
+| `availability_blocks` | Lista de bloqueos por día, turno, recurso o pareja y aula opcional. | `[]`. |
 | `forbidden_consecutive` | Lista de parejas de asignaturas no consecutivas. | `[]`. |
 | `forbidden_parallel` | Lista de parejas de asignaturas no simultáneas. | `[]`. |
 | `slots` | Lista de franjas exactas por semana y día. | Reconstruye las franjas con los intervalos y el mapa de días. |
@@ -68,6 +70,62 @@ tipo. Las referencias deben coincidir exactamente, incluidas mayúsculas y tilde
 `lessons_per_cycle` por compatibilidad; si faltan ambos se interpreta cero.
 Si están presentes los dos, prevalece `lessons_per_week`.
 `double_period` es un booleano y su valor inicial es `false`.
+
+`double_classrooms` es opcional en cada asignatura. Omitido o `null`, aplica
+el modo doble a todas las aulas cuando `double_period` es `true`. Una lista
+lo limita a esas aulas; `[]` no aplica dobles en ninguna. Con `double_period=false`
+no se aplica el modo doble, independientemente de la lista.
+
+Ejemplo de asignatura doble únicamente en 1.º y límites distintos para Ana:
+
+```json
+{
+  "subjects": [
+    {"name": "Matemáticas", "lessons_per_week": 2, "double_period": true, "double_classrooms": ["1.º"]},
+    {"name": "Lengua", "lessons_per_week": 2}
+  ],
+  "teacher_subjects": {"Ana": ["Matemáticas", "Lengua"]},
+  "teacher_subject_classrooms": {
+    "Ana": {"Matemáticas": ["1.º"], "Lengua": ["2.º"]}
+  }
+}
+```
+
+Este fragmento necesita el resto de la configuración, incluidos profesores y
+aulas existentes. Los límites de pareja se intersectan con `teacher_classrooms`.
+Una pareja ausente no añade restricciones; una lista vacía bloquea todas sus
+aulas. Esto difiere de la lista general vacía, que conserva su significado
+histórico de acceso sin limitación. Los nuevos campos se guardan tanto en la
+configuración editable como en la copia del horario generado; los archivos
+anteriores, que los omiten, conservan sus reglas originales.
+
+Un bloqueo de `availability_blocks` tiene `day` (entero de 1 a 6), `period`
+(entero positivo, o `null`/omitido para todo el día), `teacher`, `subject` y
+`classroom` (nombre de un aula existente, o `null`/omitido para todas las aulas).
+Al menos uno de los dos recursos debe estar indicado y existir; si están ambos,
+debe existir su asociación. No se aceptan valores booleanos como día o turno.
+
+```json
+{
+  "availability_blocks": [
+    {"teacher": "A", "subject": "B", "classroom": "C", "day": 1, "period": 4},
+    {"teacher": "A", "subject": "B", "classroom": "C", "day": 1, "period": 5},
+    {"teacher": "A", "subject": "B", "classroom": "C", "day": 2, "period": 4},
+    {"teacher": "A", "subject": "B", "classroom": "C", "day": 2, "period": 5},
+    {"teacher": "A", "subject": "B", "classroom": "C", "day": 4, "period": 5},
+    {"teacher": "A", "day": 3, "period": 1},
+    {"subject": "B", "day": 5, "period": null}
+  ]
+}
+```
+
+El ejemplo bloquea A–B en C los lunes y martes en los turnos 4 y 5, y el jueves
+solo en el turno 5. También bloquea A con cualquier asignatura el miércoles en
+el turno 1, y B con cualquier profesor el viernes completo, estos dos en todas
+las aulas. Los bloqueos se repiten cada semana y se suman a los mapas de días
+históricos. Los documentos anteriores que omiten `classroom` mantienen el alcance
+de todas las aulas; los que omiten `availability_blocks` conservan sus reglas.
+La configuración editable y la copia del horario guardan sus propios bloqueos.
 
 Las parejas deben contener dos asignaturas distintas y existentes. Su orden no
 importa. Los días bloqueados admiten enteros de 1 a 6. Por compatibilidad,

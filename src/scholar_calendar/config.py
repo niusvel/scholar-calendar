@@ -9,8 +9,10 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+from .availability import block_key
 from .clock import DEFAULT_CLASS_START, minutes_since_midnight
 from .models import (
+    AvailabilityBlock,
     Classroom,
     PlanningInput,
     PlanningSlot,
@@ -92,11 +94,17 @@ def planning_from_dict(data: dict[str, Any]) -> PlanningInput:
     saturday_weeks = frozenset(int(week) for week in data.get("saturday_weeks", []))
     planning = PlanningInput(
         weeks=weeks,
+        availability_blocks=frozenset(
+            AvailabilityBlock(**item) for item in data.get("availability_blocks", [])
+        ),
         subjects=tuple(
             Subject(
                 item["name"],
                 int(item.get("lessons_per_week", item.get("lessons_per_cycle", 0))),
                 bool(item.get("double_period", False)),
+                None
+                if item.get("double_classrooms") is None
+                else frozenset(item["double_classrooms"]),
             )
             for item in data["subjects"]
         ),
@@ -116,6 +124,10 @@ def planning_from_dict(data: dict[str, Any]) -> PlanningInput:
         },
         teacher_classrooms={
             name: frozenset(classrooms) for name, classrooms in data["teacher_classrooms"].items()
+        },
+        teacher_subject_classrooms={
+            teacher: {subject: frozenset(rooms) for subject, rooms in subjects.items()}
+            for teacher, subjects in data.get("teacher_subject_classrooms", {}).items()
         },
         forbidden_consecutive=frozenset(
             frozenset(pair) for pair in data.get("forbidden_consecutive", [])
@@ -155,6 +167,9 @@ def planning_to_dict(planning: PlanningInput, *, include_slots: bool = False) ->
             periods.append({"start": period[0], "end": period[1]})
 
     data: dict[str, Any] = {
+        "availability_blocks": [
+            asdict(block) for block in sorted(planning.availability_blocks, key=block_key)
+        ],
         "course_name": planning.course_name,
         "weeks": planning.weeks,
         "days": max((slot.day for slot in planning.slots), default=5),
@@ -181,6 +196,9 @@ def planning_to_dict(planning: PlanningInput, *, include_slots: bool = False) ->
                 "name": subject.name,
                 "lessons_per_week": subject.lessons_per_cycle,
                 "double_period": subject.double_period,
+                "double_classrooms": None
+                if subject.double_classrooms is None
+                else sorted(subject.double_classrooms),
             }
             for subject in planning.subjects
         ],
@@ -191,6 +209,10 @@ def planning_to_dict(planning: PlanningInput, *, include_slots: bool = False) ->
         },
         "teacher_classrooms": {
             name: sorted(classrooms) for name, classrooms in planning.teacher_classrooms.items()
+        },
+        "teacher_subject_classrooms": {
+            teacher: {subject: sorted(rooms) for subject, rooms in subjects.items()}
+            for teacher, subjects in planning.teacher_subject_classrooms.items()
         },
         "forbidden_consecutive": sorted(sorted(pair) for pair in planning.forbidden_consecutive),
         "forbidden_parallel": sorted(sorted(pair) for pair in planning.forbidden_parallel),

@@ -34,15 +34,21 @@ Todas las rutas de esta tabla están bajo `src/scholar_calendar/`.
 | `models.py` | Entidades, configuración, construcción de turnos y franjas. |
 | `clock.py` | Inicio por defecto y utilidades de conversión de horas. |
 | `defaults.py` | Centro vacío que usa la aplicación al iniciar y limpiar. |
+| `availability.py` | Combinación e indexación de bloqueos históricos y detallados, con formato común de día y turno. |
+| `availability_editor.py` | Formulario de disponibilidad de profesores, asignaturas y parejas, con alta, edición y eliminación. |
 | `validation.py` | Consistencia de recursos, referencias, reloj y franjas. |
 | `solver.py` | Modelo CP-SAT, resolución y clases asignadas. |
+| `generation_diagnostics.py` | Grupos de restricciones identificables y extracción de conflictos demostrados. |
+| `generation_failure.py` | Ventana centrada con diagnóstico desplazable y regreso a configuración. |
 | `timeline.py` | Actividades de un día: clases, cambios, pausas y huecos. |
 | `config.py` | Lectura y serialización de la configuración, incluidas franjas exactas. |
+| `project_dialog.py` | Selector visual de proyectos, navegación, búsqueda y vista previa antes de cargar. No escribe archivos. |
 | `project_file.py` | Documento actual con configuración y horario opcional. |
 | `schedule_file.py` | Formato de horario guardado y compatibilidad con archivos anteriores. |
 | `storage.py` | Escritura JSON mediante reemplazo atómico. |
 | `desktop.py` | Ventanas, formularios, edición de recursos y coordinación de acciones. |
 | `configuration_overview.py` | Resumen completo de configuración y acceso a editores. |
+| `classroom_scope.py` | Selector de todas las aulas o un conjunto explícito, compartido por dobles y asociaciones. |
 | `schedule_updates.py` | Comparación de entradas de generación y aplicación segura de cambios de nombre. |
 | `schedule_grid.py` | Cuadrícula Canvas, desplazamiento y selección por asignatura. |
 | `subject_details.py` | Texto de las restricciones relevantes para una asignatura. |
@@ -80,7 +86,8 @@ nuevas horas, nombres o restricciones. La cuadrícula, la nota y el PDF consulta
 
 1. `_open_editor(section)` conserva una copia de `planning` y la semana visible.
 2. Muestra una página del `Toplevel` reutilizable, centra el diálogo y captura el
-   foco con `grab_set`. Solo se ve el editor elegido.
+   foco con `grab_set`. Hay cuatro editores: aulas, asignaturas, profesores y jornada.
+   Asignaturas y profesores agrupan sus propios formularios en pestañas.
 3. Los callbacks actualizan listas, asociaciones, variables y reglas.
 4. `_apply_editor()` llama a `_sync_planning()`: lee campos, construye la nueva
    configuración y la valida. Si hay un error, mantiene abierto el editor.
@@ -93,14 +100,17 @@ nuevas horas, nombres o restricciones. La cuadrícula, la nota y el PDF consulta
 Cancelar sigue el mismo cierre, pero primero restaura la copia inicial. Los
 nombres actúan como identificadores: `_update_resource_rules()` conserva los
 bloqueos y las parejas al renombrar y retira referencias al eliminar recursos.
-Los selectores se actualizan para no ofrecer recursos borrados.
+Los selectores se actualizan para no ofrecer recursos borrados. Las pestañas
+que dependen de recursos todavía inexistentes se deshabilitan; los bloqueos
+de profesor y asignatura usan variables y formularios independientes.
 
 ## Generación, guardado y carga
 
 `_generate()` sincroniza la configuración, comprueba los recursos mínimos y llama
 a `solve()`. Solo al recibir un resultado sustituye `schedule` y
 `schedule_planning`. Si falla, conserva el resultado anterior y muestra el error.
-La búsqueda tiene un límite de 10 segundos y ocurre en el hilo de Tk: no hay
+La búsqueda tiene un límite de 10 segundos; una inviabilidad demostrada puede
+añadir hasta 10 segundos de búsqueda de diagnóstico. Ambas ocurren en el hilo de Tk: no hay
 worker, barra de progreso ni cancelación de la búsqueda.
 
 `_save()` recoge la configuración actual y construye un `CalendarProject` con el

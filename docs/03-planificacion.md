@@ -80,6 +80,12 @@ significa que no tiene limitación de aulas. Si una asignatura con frecuencia
 positiva no tiene ningún profesor elegible en un aula, se informa antes de
 resolver.
 
+`teacher_subject_classrooms[profesor][asignatura]` permite limitar las aulas de
+una pareja concreta. Debe existir previamente la asociación profesor–asignatura.
+La ausencia de esa entrada no añade límites; un conjunto explícitamente vacío
+no permite ninguna aula. Los límites generales y los de la pareja se intersectan:
+un límite específico nunca amplía el acceso general del profesor.
+
 En una franja no pueden coincidir dos clases del mismo profesor ni dos clases
 en la misma aula. Las celdas libres están permitidas: no se exige llenar todos
 los turnos. El modelo no obliga a mantener un único profesor para una asignatura,
@@ -91,7 +97,10 @@ Una asignatura normal puede aparecer como máximo una vez por día en un aula.
 Por tanto, una frecuencia semanal superior al número de días disponibles no
 puede cumplirse para esa asignatura.
 
-Una asignatura marcada como doble:
+El modo doble se aplica por defecto a todas las aulas (`double_classrooms=None`).
+Una selección concreta lo limita a esas aulas; en las demás se aplica el máximo
+de una sesión al día. Un conjunto vacío desactiva los dobles en todas las aulas.
+Las siguientes condiciones se exigen por semana y aula donde se aplica el modo:
 
 1. Puede aparecer como máximo dos veces al día en cada aula.
 2. Las dos sesiones del mismo día deben ocupar turnos consecutivos.
@@ -103,11 +112,33 @@ semana y día, **no** en que el final de una clase coincida con el inicio de la
 siguiente. Una pareja puede quedar a ambos lados de una pausa, aunque una preferencia
 penaliza específicamente las parejas que atraviesan la merienda.
 
+La preferencia de dobles sin merienda también se limita a esas aulas. La
+preferencia de distribución fuera de los turnos 5.º y 6.º sigue aplicándose
+a todas las asignaturas y aulas.
+
 ## Bloqueos e incompatibilidades
 
-Los días bloqueados de un profesor o asignatura se aplican en todas las semanas.
-No se configuran intervalos de indisponibilidad dentro de un día, ni excepciones
-para una semana concreta.
+Los bloqueos se aplican en todas las semanas. Pueden afectar a un
+profesor, a una asignatura o a una pareja profesor–asignatura existente. Indican
+un día (1–6) y un turno ordinal positivo; `period=None` bloquea todo el día.
+`classroom=None` aplica el bloqueo en todas las aulas; un nombre lo limita a esa
+aula, sin impedir clases equivalentes en las demás. Se admiten turnos distintos
+para cada día mediante varios bloques.
+Los tres alcances se suman. Bloquear A–B no impide que A imparta otra asignatura
+ni que otro profesor imparta B en esa franja.
+
+`availability_blocks` guarda los bloqueos detallados. Los mapas históricos
+`teacher_unavailable_days` y `subject_unavailable_days` siguen siendo válidos;
+`all_blocks()` los combina y `availability_index()` indexa por profesor, asignatura
+y aula. `is_blocked()` comprueba los tres alcances de recurso tanto para el aula
+del candidato como para todas las aulas, sin recorrer todas las reglas. El motor no
+crea candidatos bloqueados. `with_blocks()` conserva los días completos generales sin aula
+en los mapas históricos y las restricciones restantes en `availability_blocks`.
+
+Los bloqueos siguen al número de turno aunque cambien las horas. Se permite
+conservar un bloqueo para un turno o día sin franjas actuales; será efectivo
+si esa franja se incorpora después. No hay excepciones para semanas concretas
+ni intervalos de reloj independientes de los turnos de clase.
 
 `forbidden_consecutive` contiene parejas de asignaturas que no pueden ocupar
 turnos ordinales adyacentes en una misma aula, en ninguno de los dos órdenes.
@@ -165,8 +196,37 @@ que atraviesan la merienda; la función objetivo minimiza su suma.
 
 El solver dispone de **10 segundos** y **8 workers**. Se aceptan los estados
 `OPTIMAL` y `FEASIBLE`. `UNKNOWN` produce un mensaje de tiempo agotado sin afirmar
-que el problema sea imposible. Los demás estados no aceptados producen un error
-de planificación. El resultado se ordena por semana, día, turno y aula.
+que el problema sea imposible. `INFEASIBLE` activa el diagnóstico descrito abajo.
+Los estados de error del modelo tampoco se presentan como una configuración
+demostrada imposible. El resultado se ordena por semana, día, turno y aula.
+
+## Diagnóstico de imposibilidad
+
+La ausencia de profesores elegibles se detecta antes de construir el modelo;
+se listan las asignaturas y aulas afectadas y se distingue entre falta de
+asociación y aulas excluidas por los profesores asociados.
+
+Ante `INFEASIBLE`, `_build_model(..., diagnostic=True)` reconstruye las mismas
+reglas obligatorias con grupos activados mediante supuestos de CP-SAT. Incluye
+frecuencias por semana, límites de ocupación, distribución diaria y dobles,
+incompatibilidades y cada bloqueo de disponibilidad. En este modelo los
+candidatos bloqueados se conservan y se anulan mediante su supuesto, para
+poder identificar el bloqueo. Las asociaciones siguen determinando los
+profesores elegibles y se explican junto a la frecuencia. Las preferencias
+no intervienen en el diagnóstico; no se configura un objetivo de optimización.
+
+`DiagnosticRules.explain()` usa un worker y hasta diez segundos de búsqueda:
+hasta cinco para obtener un conjunto suficiente de restricciones incompatibles
+y el tiempo restante para intentar retirar reglas innecesarias. Solo acepta una
+retirada si la incompatibilidad restante queda demostrada; un tiempo agotado
+conserva la regla. No garantiza el conjunto más pequeño ni enumera todos los
+conflictos independientes. Si no obtiene un conjunto demostrado, devuelve vacío
+y se informa de que no se pudo aislar la causa.
+
+Este mecanismo sigue la [documentación de los supuestos de OR-Tools](https://github.com/google/or-tools/blob/stable/ortools/sat/cp_model.proto).
+`ScheduleError.conflicts` contiene las explicaciones estructuradas; su texto
+también las incluye para clientes sin interfaz. El diagnóstico no cambia la
+configuración ni relaja las reglas al generar un horario.
 
 ## Qué no optimiza ni modela
 

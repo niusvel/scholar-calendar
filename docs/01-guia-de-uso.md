@@ -37,20 +37,22 @@ Los diálogos pueden desplazarse verticalmente cuando el contenido no cabe.
 ## Configurar el centro
 
 La pestaña **Configuración del centro** reúne toda la información y se desplaza
-verticalmente. Los botones abren editores específicos:
+verticalmente. El recorrido empieza por **1. Aulas / grupos**, continúa con
+**2. Asignaturas** y termina con **3. Profesores**. Debajo puedes ajustar la
+jornada y los días lectivos. Cada apartado tiene un único botón **Configurar**.
 
-| Apartado o botón | Qué modifica |
+| Apartado | Contenido del editor |
 | --- | --- |
-| Jornada escolar → Editar | Nombre del curso, semanas, reloj, turnos diarios y sábados. |
-| Días lectivos → Editar | El mismo editor de jornada. |
-| Asignaturas → Editar | Nombres, sesiones semanales por aula y turnos dobles. |
-| Profesores → Editar | Altas, cambios de nombre y bajas de profesores. |
-| Aulas / grupos → Editar | Altas, cambios de nombre y bajas de aulas. |
-| Asociaciones | Profesores habilitados por asignatura y limitaciones de aulas. |
-| Días bloqueados / Restricciones | Días no disponibles y parejas de asignaturas incompatibles. |
+| Aulas / grupos | Creación, cambio de nombres y eliminación de grupos. |
+| Asignaturas | Pestañas **Asignaturas y aulas** (frecuencia y dobles), **Disponibilidad** e **Incompatibilidades**. |
+| Profesores | Pestañas **Profesores**, **Asignaturas y aulas**, **Aulas generales** y **Disponibilidad**. |
+| Jornada escolar / Días lectivos | Curso, semanas, reloj, turnos por día, sábados y vista previa. |
 
-Los botones repetidos de **Asociaciones** comparten su diálogo. Los de **Días
-bloqueados** abren el de restricciones, que es distinto al de asociaciones.
+Las pestañas que necesitan recursos se habilitan cuando estos existen. Por
+ejemplo, para asociar un profesor con una asignatura y sus aulas deben haberse
+creado los tres recursos. Seleccionar una asignatura o profesor facilita pasar
+a sus formularios asociados con ese recurso ya elegido. Cada tipo tiene su
+propia selección de días, para no mezclar bloqueos.
 
 En cualquier diálogo, **Guardar cambios** aplica la edición a la configuración
 en memoria. **Cancelar**, Escape o cerrar ese diálogo descarta todos los cambios
@@ -90,6 +92,10 @@ entender los huecos y las pausas.
 Añade asignaturas con una frecuencia entera positiva. Por ejemplo, «Matemáticas,
 3 sesiones» significa tres sesiones por semana en **cada aula**, no tres en todo
 el centro. Activa **Doble** para agrupar sesiones de esa asignatura en parejas.
+Por defecto se aplica en todas las aulas. Para limitarlo, desmarca **Todas las
+aulas / grupos** en **Aplicar turnos dobles en** y selecciona las aulas con un
+clic en cada una. En las demás, la asignatura tendrá como máximo una sesión
+diaria. Pulsa **Añadir** o **Editar** y después **Guardar cambios**.
 
 Selecciona una fila, modifica los campos y pulsa **Editar** para cambiar un
 recurso. Los nombres deben ser únicos dentro de su tipo. Al renombrar asignaturas
@@ -99,26 +105,71 @@ en el horario ya generado al guardar los cambios del diálogo, sin mover clases.
 También se actualizan el resaltado, las referencias y la exportación PDF. El
 nombre del curso se puede actualizar sin generar de nuevo.
 
-Asocia cada profesor con las asignaturas que puede impartir. En las asociaciones
-de aulas, escribe nombres existentes separados por comas. Una limitación con
+En **Profesores → Configurar → Asignaturas y aulas**, selecciona un profesor y una asignatura. El selector permite
+dejar **Todas las aulas / grupos** o elegir varias aulas para esa pareja. Pulsa
+**Vincular** para añadirla o **Editar** para modificar la fila seleccionada, y
+después **Guardar cambios**. Por ejemplo, Ana puede tener Matemáticas en 1.º y
+Lengua en 2.º. Seleccionar otra pareja recupera sus aulas guardadas.
+
+Estas restricciones se suman a las generales de **Profesores → Aulas generales**: si hay dos
+límites, solo se permiten las aulas presentes en ambos. Las asociaciones antiguas
+mantienen su comportamiento hasta que les añadas un límite específico.
+
+En las asociaciones generales de aulas, escribe nombres existentes separados por comas. Una limitación con
 una o más aulas permite únicamente esas aulas. Si no existe esa limitación, el
 profesor puede utilizar cualquier aula, incluidas las que añadas más tarde.
 Eliminar la última limitación de aulas vuelve a permitir todas.
 
-Evita comas dentro de los nombres de aula si vas a editar sus asociaciones con
-este formulario: ese campo utiliza la coma como separador. Los archivos JSON
-sí pueden almacenar esos nombres sin dividirlos.
+Los nuevos selectores distinguen **Todas** de una selección vacía: si desmarcas
+**Todas** y no seleccionas aulas, la pareja no podrá impartir clases en ninguna,
+o la asignatura no usará dobles en ninguna, según el selector. Al eliminar la
+última aula de una selección específica se conserva ese límite vacío. Para
+permitir todas, marca **Todas** expresamente. Al renombrar aulas, asignaturas o
+profesores, se actualizan sus selecciones y asociaciones.
+
+Evita comas dentro de los nombres de aula si vas a editar sus asociaciones
+generales con el campo de texto: utiliza la coma como separador. Los nuevos
+selectores por asignatura y los archivos JSON admiten esos nombres completos.
 
 ## Restricciones
 
-- **Días bloqueados:** selecciona un profesor o asignatura, marca los días y aplica
-  el bloqueo. Se aplica a todas las semanas; una nueva aplicación sustituye los
-  días anteriores de ese recurso.
+Los bloqueos de días y turnos se editan en la pestaña **Disponibilidad**, dentro
+de **Asignaturas** o **Profesores**. Las
+parejas incompatibles se configuran en **Asignaturas → Incompatibilidades**.
+
+- **Días y turnos bloqueados:** selecciona el recurso, marca uno o varios días y
+  elige **Todo el día** o un número de turno. Pulsa **Añadir bloqueo**. Los bloqueos
+  se suman; para cambiarlos, selecciona una fila y pulsa **Actualizar seleccionado**.
+  **Eliminar seleccionado** retira solo esa fila.
+- **Profesor al impartir una asignatura:** en **Profesores → Disponibilidad**, el
+  campo **Cuando imparte** permite escoger una asignatura asociada o **Todas las
+  asignaturas**. Para el ejemplo «A no imparte B el martes en el turno 4», elige
+  A, B, Martes y 4, añade el bloqueo y pulsa **Guardar cambios**. Otros profesores
+  pueden impartir B en ese turno, y A puede impartir otras asignaturas.
+- **Aula específica:** el campo **Aula / grupo** limita el bloqueo al aula elegida;
+  **Todas las aulas** mantiene el alcance general. Está disponible tanto para
+  profesores como para asignaturas. Para bloquear A–B en C los lunes y martes
+  en los turnos 4 y 5, selecciona A, B, C y ambos días; añade el turno 4 y luego
+  el 5. A continuación, deja marcado solo el jueves y añade el turno 5.
+  Se crearán cinco filas; el jueves seguirá disponible el turno 4 en C.
 - **No consecutivas:** impide que dos asignaturas ocupen turnos sucesivos en la
   misma aula, en cualquier orden.
 - **No paralelas:** impide que dos asignaturas distintas de una pareja coincidan
   en el mismo turno, incluso en aulas diferentes. Permite clases simultáneas de
   la misma asignatura con profesores diferentes.
+
+Un bloqueo de asignatura afecta a todos sus profesores; uno general de profesor
+abarca todas sus asignaturas. Los bloqueos de ambos y los de pareja se acumulan,
+son obligatorios y se repiten en todas las semanas, dentro del aula indicada
+o en todas si no se limita el aula. Para varios turnos,
+añade un bloqueo por turno. El número identifica el turno de clase, sin contar
+merienda, comida o cambios. Si cambia su hora, el bloqueo sigue a ese número.
+Los turnos que no existan en un día no producen ningún efecto hasta que existan.
+
+Los bloqueos antiguos por día completo se cargan como **Todo el día**. Renombrar
+recursos mantiene sus bloqueos; eliminar una asociación retira únicamente los de
+esa pareja. Eliminar un aula retira sus bloqueos específicos y conserva los
+generales. Cambiar los bloqueos requiere generar un nuevo horario.
 
 Para quitar un bloqueo o pareja, selecciona su fila y pulsa Eliminar. Una lista
 vacía no añade restricciones. Las reglas completas, incluidos los límites de
@@ -157,6 +208,28 @@ recursos en archivos editados externamente.
 
 ## Generar y consultar
 
+Si la configuración es incompatible, se abre una ventana centrada con las
+condiciones que no pueden cumplirse juntas. Indica asignaturas, profesores,
+aulas, semanas, frecuencias y bloqueos implicados, según el conflicto, y muestra
+qué sección debes revisar. **Revisar configuración** vuelve a la pantalla de
+configuración. La lista tiene desplazamiento y no modifica ningún dato.
+
+Por ejemplo, puede señalar que Matemáticas requiere tres sesiones, que solo hay
+dos turnos en esa semana, o que un bloqueo de Ana impide impartirla en un aula.
+También identifica profesores compartidos, límites diarios, dobles e
+incompatibilidades. Si no hay profesor elegible, distingue entre falta de
+asociación y restricciones de aulas de los profesores asociados.
+
+Las condiciones se deben evaluar juntas: no significa que cada una esté mal por
+separado. Puede haber otros conflictos independientes; tras corregir la
+configuración, vuelve a generar. Las preferencias opcionales no impiden generar.
+El horario anterior se conserva si el intento falla.
+
+La búsqueda del horario dispone de diez segundos. Si demuestra imposibilidad,
+se realiza un diagnóstico adicional con hasta diez segundos de búsqueda. Si no
+consigue aislar la causa en ese plazo, lo indica sin inventarla. Agotar el tiempo
+de generación sin encontrar solución no demuestra que el horario sea imposible.
+
 Pulsa **Generar horario**. La aplicación muestra el resultado en la pestaña
 Horario. Usa el selector de semana o las flechas para navegar. Las cabeceras
 separan los días y las columnas corresponden a las aulas. La merienda se muestra
@@ -183,6 +256,18 @@ El botón con el icono ☰, a la izquierda de la cabecera, abre el menú.
 | Limpiar | Restablece un centro vacío con los valores iniciales. |
 | Reglas de generación | Abre una ventana centrada con las reglas obligatorias, dinámicas y opcionales. |
 | Salir / ⌘Q | Cierra la aplicación. |
+
+Guardar y Cargar abren un selector centrado con el estilo de la aplicación.
+Puedes navegar por carpetas con doble clic, **Subir**, las ubicaciones rápidas
+o escribiendo una ruta y pulsando **Ir**. El buscador filtra por nombre y se
+muestran las carpetas y los archivos JSON. Al seleccionar un archivo para cargar,
+se muestra el curso, los recursos y si contiene un horario; un archivo inválido
+no habilita **Cargar**. Se abre inicialmente en la carpeta del proyecto actual,
+o en la carpeta de trabajo si todavía no hay uno.
+
+Al guardar, escribe el nombre: se añade `.json` si hace falta. Se pide confirmación
+antes de reemplazar un archivo existente. **Cancelar**, Escape o cerrar el
+selector no cambia los datos ni escribe archivos.
 
 Guardar permite elegir un nombre diferente cada vez. Cargar un documento con
 horario no vuelve a ejecutar el planificador. Cargar solo una configuración

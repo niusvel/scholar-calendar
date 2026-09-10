@@ -40,9 +40,10 @@ mutarlos.
 
 | Clase | Campos |
 | --- | --- |
-| `Subject` | `name: str`, `lessons_per_cycle: int`, `double_period: bool = False`. La frecuencia es semanal. |
+| `Subject` | `name: str`, `lessons_per_cycle: int`, `double_period: bool = False`, `double_classrooms: frozenset[str] \| None = None`. La frecuencia es semanal. `is_double_in(aula)` resuelve el modo de esa aula. |
 | `Teacher` | `name: str`. |
 | `Classroom` | `name: str`. |
+| `AvailabilityBlock` | `day: int`, `period: int \| None = None`, `teacher: str \| None = None`, `subject: str \| None = None`, `classroom: str \| None = None`. Bloqueo recurrente e inmutable; sin aula se aplica a todas. |
 | `PlanningSlot` | `week`, `day`, `period` enteros; `start`, `end` de tipo `datetime.time`. |
 | `ScheduledLesson` | `week`, `day`, `period`, `classroom`, `subject`, `teacher`, `start`, `end`. Las horas son texto `HH:MM`. |
 | `Schedule` | `lessons: tuple[ScheduledLesson, ...]`. |
@@ -55,6 +56,7 @@ mutarlos.
 | `weeks` | Cantidad de semanas. |
 | `subjects`, `teachers`, `classrooms`, `slots` | Tuplas de los modelos anteriores. |
 | `teacher_subjects`, `teacher_classrooms` | Diccionarios de nombres a `frozenset[str]`. |
+| `teacher_subject_classrooms` | `dict[str, dict[str, frozenset[str]]]`: límites de aula por profesor y asignatura. Inicialmente `{}`. Una entrada vacía no permite ninguna aula. `teacher_can_teach(profesor, asignatura, aula)` combina asociación y ambos límites. |
 | `forbidden_consecutive`, `forbidden_parallel` | `frozenset[frozenset[str]]`; cada conjunto interior es una pareja. |
 | `course_name` | Texto, inicialmente vacío. |
 | `day_period_counts` | Mapa de días a turnos, o `None`. |
@@ -65,6 +67,7 @@ mutarlos.
 | `lunch_start`, `lunch_end` | `None` en el constructor del modelo. |
 | `lunch_after_period` | 6 por defecto. |
 | `teacher_unavailable_days`, `subject_unavailable_days` | Mapas a `frozenset[int]`, o `None`. |
+| `availability_blocks` | `frozenset[AvailabilityBlock]`, inicialmente vacío. Se suma a los bloqueos de días completos. |
 
 **El constructor básico y los valores de la aplicación no son idénticos.** Para
 obtener un centro con los valores que ve el usuario, llama a
@@ -82,6 +85,7 @@ configuración nueva sin recursos.
 | `models.build_slots(...)` | Repite los intervalos por semanas y días y aplica turnos y sábados. |
 | `validation.validate_planning(planning)` | Valida estructura; devuelve `None` o lanza `ValueError`. |
 | `solver.solve(planning)` | Devuelve `Schedule`; puede lanzar `ValueError` o `ScheduleError`. |
+| `ScheduleError.summary` / `.conflicts` | Resumen y tupla de `ConfigurationConflict(title, detail, section)`. La tupla está vacía si no se aisló un conflicto demostrado. `str(error)` incluye todo el diagnóstico. |
 | `timeline.daily_rows(planning, week, day)` | Devuelve `tuple[TimelineRow, ...]` para un día. |
 | `subject_details.subject_restrictions(planning, schedule, subject_name)` | Devuelve las líneas de restricciones de esa asignatura. |
 
@@ -218,6 +222,9 @@ entorno restringido se necesita acceso a la sesión gráfica para crear Tk.
 | `test_clock.py` | Alineación de clases, pausas, huecos y validación del reloj. |
 | `test_calendar_config.py` | Configuración, intervalos explícitos, sábados y compatibilidad. |
 | `test_solver.py` | Frecuencias, dobles, días bloqueados, incompatibilidades, preferencias y tiempo agotado. |
+| `test_generation_diagnostics.py` | Causas demostradas, aulas y recursos afectados, exclusión de reglas irrelevantes, límites de diagnóstico y ausencia de falsas causas ante errores o tiempo agotado. |
+| `test_availability.py` | Alcance de bloqueos por turno, pareja y aula, combinación con días completos y restricciones generales, validación, guardado y renombrado. |
+| `test_classroom_rules.py` | Elegibilidad por pareja y aula, dobles por aula, referencias, compatibilidad, guardado y cambios de nombres. |
 | `test_schedule_updates.py` | Clasificación de cambios, renombrado de referencias y ediciones mixtas. |
 | `test_project_file.py` | Documento unificado, ciclos irregulares y rechazo de configuraciones inválidas. |
 | `test_schedule_file.py` | Horarios históricos, asignaciones exactas, corrupción y fallo de escritura. |

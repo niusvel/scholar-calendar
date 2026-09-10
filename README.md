@@ -51,6 +51,24 @@ Los cambios de restricciones muestran un aviso persistente para generar un nuevo
 horario. **Cargar** lo recupera sin recalcular.
 **Limpiar** vacía la ventana y restablece los valores iniciales; no elimina archivos.
 
+La configuración sigue el orden **Aulas → Asignaturas → Profesores**. Cada
+apartado reúne sus restricciones y asociaciones. Guardar y Cargar usan un
+selector de proyectos con búsqueda y vista previa.
+
+Las asociaciones profesor–asignatura pueden limitarse a aulas concretas. Las
+asignaturas dobles también permiten seleccionar sus aulas: en las demás se
+programan como sencillas. Ambos ajustes aparecen en el resumen y en las notas
+del horario, y se conservan al guardar el proyecto.
+La pestaña **Disponibilidad** permite bloquear días completos o turnos concretos
+para un profesor, una asignatura o una pareja profesor–asignatura, en todas las
+aulas o en una específica. Cada día puede tener turnos bloqueados distintos.
+Si no se puede generar el horario, la aplicación muestra las condiciones que
+entran en conflicto y las secciones de configuración que debes revisar.
+
+Puedes probarlos cargando [el ejemplo por aulas](examples/aulas-por-asignatura.json):
+Ana y Luis imparten ambas asignaturas en grupos distintos, y Matemáticas usa
+dobles solo en el Grupo A.
+
 ## Documentación, de lo general a lo detallado
 
 | Lectura | Contenido |

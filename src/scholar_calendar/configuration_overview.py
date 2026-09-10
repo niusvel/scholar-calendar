@@ -5,6 +5,7 @@ from collections import Counter
 from collections.abc import Callable
 from tkinter import ttk
 
+from .availability import block_key, block_time
 from .clock import minutes_since_midnight
 from .models import PlanningInput
 from .timeline import DAY_NAMES, daily_rows
@@ -64,10 +65,21 @@ def configuration_sections(planning: PlanningInput) -> dict[str, tuple[tuple[str
         detail = f"{subject.lessons_per_cycle} sesiones / semana / aula · " + (
             "Turnos dobles" if subject.double_period else "Una sesión al día como máximo"
         )
+        if subject.double_period:
+            detail += " en " + (
+                "todas las aulas"
+                if subject.double_classrooms is None
+                else ", ".join(sorted(subject.double_classrooms)) or "ninguna aula"
+            )
+            if subject.double_classrooms is not None:
+                detail += "; sencillos en las demás"
         detail += "\nProfesores: " + (", ".join(teachers) or "Sin profesor asociado")
         detail += "\nDías bloqueados: " + days(
             (planning.subject_unavailable_days or {}).get(subject.name, ())
         )
+        for block in sorted(planning.availability_blocks, key=block_key):
+            if block.subject == subject.name and block.teacher is None:
+                detail += "\nNo disponible: " + block_time(block)
         subjects.append((subject.name, detail))
     teachers = []
     for teacher in planning.teachers:
@@ -80,10 +92,24 @@ def configuration_sections(planning: PlanningInput) -> dict[str, tuple[tuple[str
             or "Todas las aulas"
         )
         blocked = days((planning.teacher_unavailable_days or {}).get(teacher.name, ()))
+        specific = "".join(
+            f"\n{subject}: " + (", ".join(sorted(allowed)) or "Ninguna aula")
+            for subject, allowed in sorted(
+                planning.teacher_subject_classrooms.get(teacher.name, {}).items()
+            )
+        )
+        for block in sorted(planning.availability_blocks, key=block_key):
+            if block.teacher == teacher.name:
+                scope = (
+                    f"al impartir {block.subject}"
+                    if block.subject is not None
+                    else "todas las asignaturas"
+                )
+                specific += f"\nNo disponible ({scope}): {block_time(block)}"
         teachers.append(
             (
                 teacher.name,
-                f"Asignaturas: {subjects_for_teacher}\nAulas: {rooms}\nDías bloqueados: {blocked}",
+                f"Asignaturas: {subjects_for_teacher}\nAulas generales: {rooms}{specific}\nDías bloqueados: {blocked}",
             )
         )
     classrooms = []
@@ -91,8 +117,10 @@ def configuration_sections(planning: PlanningInput) -> dict[str, tuple[tuple[str
         allowed = sorted(
             teacher.name
             for teacher in planning.teachers
-            if not planning.teacher_classrooms.get(teacher.name)
-            or room.name in planning.teacher_classrooms[teacher.name]
+            if any(
+                planning.teacher_can_teach(teacher.name, subject, room.name)
+                for subject in planning.teacher_subjects.get(teacher.name, ())
+            )
         )
         classrooms.append(
             (room.name, "Profesores con acceso: " + (", ".join(allowed) or "Sin profesores"))
@@ -135,60 +163,59 @@ class ConfigurationOverview(ttk.Frame):
         self.on_edit = on_edit
         self.summary = ttk.Label(self, style="Status.TLabel", padding=(2, 0, 0, 14))
         self.summary.pack(anchor=tk.W)
-        top = ttk.Frame(self, style="App.TFrame")
-        top.pack(fill=tk.X)
-        top.columnconfigure((0, 1), weight=1, uniform="summary")
         self.cards = {}
+        self.edit_buttons = {}
         definitions = (
-            ("clock", "Jornada escolar", "clock"),
-            ("days", "Días lectivos", "clock"),
-            ("subjects", "Asignaturas", "subjects"),
-            ("teachers", "Profesores y asociaciones", "teachers"),
-            ("classrooms", "Aulas / grupos", "classrooms"),
-            ("rules", "Restricciones entre asignaturas", "rules"),
+            ("classrooms", "1. Aulas / grupos", "Crea los grupos que recibirán las clases."),
+            (
+                "subjects",
+                "2. Asignaturas",
+                "Define sesiones, dobles por aula y restricciones de las asignaturas.",
+            ),
+            (
+                "teachers",
+                "3. Profesores",
+                "Añade profesores y configura sus asignaturas, aulas y disponibilidad.",
+            ),
+            ("clock", "Jornada escolar", "Ajusta el ciclo, los turnos y las pausas."),
+            ("days", "Días lectivos", "Revisa los turnos de cada día y los sábados activos."),
         )
-        for index, (key, title, section) in enumerate(definitions):
-            card = ttk.Frame(top if index < 2 else self, style="Surface.TFrame", padding=20)
-            if index < 2:
-                card.grid(
-                    row=0,
-                    column=index,
-                    sticky="nsew",
-                    padx=(0, 7) if index == 0 else (7, 0),
-                    pady=(0, 14),
-                )
-            else:
-                card.pack(fill=tk.X, pady=(0, 14))
+        for key, title, description in definitions:
+            card = ttk.Frame(self, style="Surface.TFrame", padding=20)
+            card.pack(fill=tk.X, pady=(0, 14))
             heading = ttk.Frame(card, style="Card.TFrame")
             heading.pack(fill=tk.X, pady=(0, 14))
             ttk.Label(heading, text=title, style="Section.TLabel").pack(side=tk.LEFT)
-            ttk.Button(
-                heading, text="Editar", command=lambda section=section: on_edit(section)
-            ).pack(side=tk.RIGHT)
-            if key in ("subjects", "teachers", "classrooms"):
-                ttk.Button(
-                    heading, text="Asociaciones", command=lambda: on_edit("associations")
-                ).pack(side=tk.RIGHT, padx=6)
-            if key in ("subjects", "teachers"):
-                ttk.Button(heading, text="Días bloqueados", command=lambda: on_edit("rules")).pack(
-                    side=tk.RIGHT
-                )
+            section = "clock" if key == "days" else key
+            button = ttk.Button(
+                heading, text="Configurar", command=lambda section=section: on_edit(section)
+            )
+            button.pack(side=tk.RIGHT)
+            self.edit_buttons[key] = button
+            ttk.Label(card, text=description, style="Muted.TLabel", wraplength=800).pack(
+                anchor=tk.W, pady=(0, 14)
+            )
             content = ttk.Frame(card, style="Card.TFrame")
             content.pack(fill=tk.X)
             self.cards[key] = content
 
     def show(self, planning: PlanningInput) -> None:
         self.summary.configure(
-            text=f"Toda la configuración del centro · {len(planning.subjects)} asignaturas · {len(planning.teachers)} profesores · {len(planning.classrooms)} aulas"
+            text=f"Toda la configuración del centro · {len(planning.classrooms)} aulas · {len(planning.subjects)} asignaturas · {len(planning.teachers)} profesores"
         )
-        for key, rows in configuration_sections(planning).items():
+        sections = configuration_sections(planning)
+        if planning.subjects:
+            sections["subjects"] += sections["rules"]
+        sections.pop("rules")
+        for key in self.cards:
+            rows = sections[key]
             content = self.cards[key]
             for child in content.winfo_children():
                 child.destroy()
             if not rows:
                 ttk.Label(
                     content,
-                    text="Todavía no hay datos. Pulsa Editar para empezar.",
+                    text="Todavía no hay datos. Pulsa Configurar para empezar.",
                     style="Muted.TLabel",
                 ).pack(anchor=tk.W)
                 continue

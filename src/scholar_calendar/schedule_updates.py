@@ -3,6 +3,7 @@
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from .availability import all_blocks
 from .models import PlanningInput
 from .solver import Schedule
 
@@ -26,7 +27,12 @@ def generation_signature(planning: PlanningInput) -> tuple:
         planning.weeks,
         tuple(
             sorted(
-                (subject.name, subject.lessons_per_cycle, subject.double_period)
+                (
+                    subject.name,
+                    subject.lessons_per_cycle,
+                    subject.double_period,
+                    subject.double_classrooms if subject.double_period else None,
+                )
                 for subject in planning.subjects
             )
         ),
@@ -44,6 +50,11 @@ def generation_signature(planning: PlanningInput) -> tuple:
             if values
         ),
         planning.forbidden_consecutive,
+        frozenset(
+            (teacher, subject, frozenset(rooms))
+            for teacher, subjects in planning.teacher_subject_classrooms.items()
+            for subject, rooms in subjects.items()
+        ),
         planning.forbidden_parallel,
         frozenset((day, count) for day, count in counts.items() if count),
         planning.saturday_weeks,
@@ -55,16 +66,7 @@ def generation_signature(planning: PlanningInput) -> tuple:
         planning.lunch_start,
         planning.lunch_end,
         planning.lunch_after_period,
-        frozenset(
-            (name, frozenset(days))
-            for name, days in (planning.teacher_unavailable_days or {}).items()
-            if days
-        ),
-        frozenset(
-            (name, frozenset(days))
-            for name, days in (planning.subject_unavailable_days or {}).items()
-            if days
-        ),
+        all_blocks(planning),
     )
 
 
@@ -82,11 +84,23 @@ def _rename_planning(planning: PlanningInput, rename: ResourceRename) -> Plannin
     def values(mapping):
         return {key: frozenset(name(value) for value in items) for key, items in mapping.items()}
 
+    planning = replace(
+        planning,
+        availability_blocks=frozenset(
+            replace(block, **{rename.kind: name(getattr(block, rename.kind))})
+            for block in planning.availability_blocks
+        ),
+    )
+
     if rename.kind == "subject":
         return replace(
             planning,
             subjects=tuple(replace(item, name=name(item.name)) for item in planning.subjects),
             teacher_subjects=values(planning.teacher_subjects),
+            teacher_subject_classrooms={
+                teacher: keys(subjects)
+                for teacher, subjects in planning.teacher_subject_classrooms.items()
+            },
             subject_unavailable_days=keys(planning.subject_unavailable_days),
             forbidden_consecutive=frozenset(
                 frozenset(name(value) for value in pair) for pair in planning.forbidden_consecutive
@@ -101,12 +115,26 @@ def _rename_planning(planning: PlanningInput, rename: ResourceRename) -> Plannin
             teachers=tuple(replace(item, name=name(item.name)) for item in planning.teachers),
             teacher_subjects=keys(planning.teacher_subjects),
             teacher_classrooms=keys(planning.teacher_classrooms),
+            teacher_subject_classrooms=keys(planning.teacher_subject_classrooms),
             teacher_unavailable_days=keys(planning.teacher_unavailable_days),
         )
     return replace(
         planning,
         classrooms=tuple(replace(item, name=name(item.name)) for item in planning.classrooms),
         teacher_classrooms=values(planning.teacher_classrooms),
+        teacher_subject_classrooms={
+            teacher: values(subjects)
+            for teacher, subjects in planning.teacher_subject_classrooms.items()
+        },
+        subjects=tuple(
+            replace(
+                subject,
+                double_classrooms=frozenset(name(room) for room in subject.double_classrooms),
+            )
+            if subject.double_classrooms is not None
+            else subject
+            for subject in planning.subjects
+        ),
     )
 
 

@@ -1,5 +1,6 @@
 """Restrictions relevant to a subject in a generated schedule."""
 
+from .availability import block_key, block_time
 from .models import PlanningInput
 from .solver import Schedule
 from .timeline import DAY_NAMES
@@ -16,15 +17,25 @@ def subject_restrictions(
     sessions = "sesión semanal" if frequency == 1 else "sesiones semanales"
     lines = [f"Por aula: {frequency} {sessions}."]
     if subject.double_period:
-        lines.append(
-            "Turnos dobles: parejas consecutivas, máximo dos turnos al día y una sesión suelta por semana."
+        scope = (
+            "todas las aulas"
+            if subject.double_classrooms is None
+            else (", ".join(sorted(subject.double_classrooms)) or "ninguna aula")
         )
+        lines.append(
+            f"Turnos dobles en {scope}: parejas consecutivas, máximo dos turnos al día y una sesión suelta por semana."
+        )
+        if subject.double_classrooms is not None:
+            lines.append("En las demás aulas: máximo una sesión al día.")
     else:
         lines.append("Máximo una sesión al día en cada aula.")
 
     days = (planning.subject_unavailable_days or {}).get(subject_name, frozenset())
     if days:
         lines.append("Asignatura no disponible: " + _day_names(days) + ".")
+    for block in sorted(planning.availability_blocks, key=block_key):
+        if block.subject == subject_name and block.teacher is None:
+            lines.append("Asignatura no disponible: " + block_time(block) + ".")
     for rules, label in (
         (planning.forbidden_consecutive, "No consecutiva en un aula con"),
         (planning.forbidden_parallel, "No simultánea entre aulas con"),
@@ -52,9 +63,19 @@ def subject_restrictions(
         days = (planning.teacher_unavailable_days or {}).get(teacher, frozenset())
         if days:
             restrictions.append("no disponible " + _day_names(days))
+        for block in sorted(planning.availability_blocks, key=block_key):
+            if block.teacher == teacher and block.subject in (None, subject_name):
+                scope = f"al impartir {subject_name}, " if block.subject is not None else ""
+                restrictions.append(scope + "no disponible " + block_time(block))
         rooms = planning.teacher_classrooms.get(teacher, frozenset())
         if rooms:
             restrictions.append("solo puede impartir en " + ", ".join(sorted(rooms)))
+        specific = planning.teacher_subject_classrooms.get(teacher, {}).get(subject_name)
+        if specific is not None:
+            restrictions.append(
+                f"para {subject_name}, aulas permitidas: "
+                + (", ".join(sorted(specific)) or "ninguna")
+            )
         if restrictions:
             role = (
                 "en este horario" if teacher in assigned else "habilitado, sin clases en este ciclo"

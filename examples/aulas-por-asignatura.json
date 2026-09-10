@@ -1,0 +1,87 @@
+{
+  "course_name": "Ejemplo · Asignaturas y dobles por aula",
+  "weeks": 1,
+  "clock": {
+    "start": "07:40",
+    "periods_per_day": 3,
+    "period_minutes": 45,
+    "transition_minutes": 5,
+    "break_start": "10:05",
+    "break_end": "10:25",
+    "lunch_start": "13:40",
+    "lunch_end": "15:00",
+    "lunch_after_period": 6
+  },
+  "day_period_counts": {
+    "1": 3,
+    "2": 3,
+    "3": 0,
+    "4": 0,
+    "5": 0
+  },
+  "saturday_weeks": [],
+  "subjects": [
+    {
+      "name": "Matemáticas",
+      "lessons_per_week": 2,
+      "double_period": true,
+      "double_classrooms": [
+        "Grupo A"
+      ]
+    },
+    {
+      "name": "Lengua",
+      "lessons_per_week": 1,
+      "double_period": false
+    }
+  ],
+  "teachers": [
+    {
+      "name": "Ana"
+    },
+    {
+      "name": "Luis"
+    }
+  ],
+  "classrooms": [
+    {
+      "name": "Grupo A"
+    },
+    {
+      "name": "Grupo B"
+    }
+  ],
+  "teacher_subjects": {
+    "Ana": [
+      "Matemáticas",
+      "Lengua"
+    ],
+    "Luis": [
+      "Matemáticas",
+      "Lengua"
+    ]
+  },
+  "teacher_classrooms": {},
+  "teacher_unavailable_days": {},
+  "subject_unavailable_days": {},
+  "forbidden_consecutive": [],
+  "forbidden_parallel": [],
+  "teacher_subject_classrooms": {
+    "Ana": {
+      "Matemáticas": [
+        "Grupo A"
+      ],
+      "Lengua": [
+        "Grupo B"
+      ]
+    },
+    "Luis": {
+      "Matemáticas": [
+        "Grupo B"
+      ],
+      "Lengua": [
+        "Grupo A"
+      ]
+    }
+  }
+}

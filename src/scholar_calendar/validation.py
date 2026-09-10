@@ -23,9 +23,29 @@ def validate_planning(planning: PlanningInput) -> None:
             raise ValueError(f"Hay nombres de {label} duplicados.")
         names.append(set(values))
     subjects, teachers, classrooms = names
+    for block in planning.availability_blocks:
+        if (
+            type(block.day) is not int
+            or not 1 <= block.day <= 6
+            or (block.period is not None and (type(block.period) is not int or block.period < 1))
+            or (block.teacher is None and block.subject is None)
+            or (block.teacher is not None and block.teacher not in teachers)
+            or (block.subject is not None and block.subject not in subjects)
+            or (block.classroom is not None and block.classroom not in classrooms)
+            or (
+                block.teacher is not None
+                and block.subject is not None
+                and block.subject not in planning.teacher_subjects.get(block.teacher, ())
+            )
+        ):
+            raise ValueError(
+                "Un bloqueo debe indicar un profesor, una asignatura o una asociación existente, un día de lunes a sábado, un turno positivo o todo el día, y un aula existente o todas las aulas."
+            )
     for subject in planning.subjects:
         if type(subject.lessons_per_cycle) is not int or subject.lessons_per_cycle < 0:
             raise ValueError("La frecuencia semanal debe ser un entero no negativo.")
+        if subject.double_classrooms is not None and not subject.double_classrooms <= classrooms:
+            raise ValueError("Los turnos dobles hacen referencia a un aula desconocida.")
     for links, allowed in (
         (planning.teacher_subjects, subjects),
         (planning.teacher_classrooms, classrooms),
@@ -35,6 +55,14 @@ def validate_planning(planning: PlanningInput) -> None:
             for teacher, values in links.items()
         ):
             raise ValueError("Una asociación hace referencia a un recurso desconocido.")
+    for teacher, links in planning.teacher_subject_classrooms.items():
+        if teacher not in teachers or any(
+            subject not in planning.teacher_subjects.get(teacher, ()) or not rooms <= classrooms
+            for subject, rooms in links.items()
+        ):
+            raise ValueError(
+                "Las aulas por profesor y asignatura deben referirse a una asociación existente y a aulas conocidas."
+            )
     for rules, allowed in (
         (planning.teacher_unavailable_days or {}, teachers),
         (planning.subject_unavailable_days or {}, subjects),

@@ -9,10 +9,15 @@ from datetime import time
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from .availability import with_blocks
+from .availability_editor import AvailabilityEditor
+from .classroom_scope import ClassroomScope, scope_description
 from .clock import DEFAULT_CLASS_START, minutes_since_midnight, parse_optional_time
 from .configuration_overview import ConfigurationOverview
 from .defaults import default_planning
+from .generation_failure import GenerationFailure
 from .models import Classroom, PlanningInput, Subject, Teacher, build_daily_periods, build_slots
+from .project_dialog import ask_project_path
 from .project_file import CalendarProject, load_project, save_project
 from .restriction_note import RestrictionNote
 from .rules_help import RulesHelp
@@ -45,6 +50,8 @@ class CalendarApp(tk.Tk):
         self.teachers: list[str] = []
         self.teacher_subjects: dict[str, set[str]] = {}
         self.teacher_classrooms: dict[str, set[str]] = {}
+        self.teacher_subject_classrooms: dict[str, dict[str, frozenset[str]]] = {}
+        self.subject_double_classrooms: dict[str, frozenset[str]] = {}
         self.course_var = tk.StringVar()
         self.weeks_var = tk.IntVar(value=2)
         self.classroom_name_var = tk.StringVar()
@@ -83,11 +90,15 @@ class CalendarApp(tk.Tk):
         self._loaded_clock_signature = None
         self._clock_preview_job = None
         self._editor_snapshot = None
+        self._project_dialog_open = False
         self._editor_renames: list[ResourceRename] = []
         self.schedule_needs_regeneration = False
         self.rules_window: RulesHelp | None = None
         configure_styles(self)
         self._build_ui()
+        self.subject_double_var.trace_add(
+            "write", lambda *_: self.subject_scope.set_enabled(self.subject_double_var.get())
+        )
         self.bind("<Escape>", lambda _event: self._select_schedule_subject(None))
         self._set_planning(self._blank_planning())
         if config_path:
@@ -198,16 +209,69 @@ class CalendarApp(tk.Tk):
         self.editor_body.pack(fill=tk.BOTH, expand=True)
         self.editor_pages = {}
         self.editor_content = {}
-        for key in ("clock", "subjects", "teachers", "classrooms", "associations", "rules"):
+        self.editor_notebooks = {}
+        self.editor_tab_pages = {}
+        groups = {
+            "classrooms": (("classrooms", "Aulas / grupos"),),
+            "subjects": (
+                ("subjects", "Asignaturas y aulas"),
+                ("subject_days", "Disponibilidad"),
+                ("rules", "Incompatibilidades"),
+            ),
+            "teachers": (
+                ("teachers", "Profesores"),
+                ("associations", "Asignaturas y aulas"),
+                ("teacher_rooms", "Aulas generales"),
+                ("teacher_days", "Disponibilidad"),
+            ),
+            "clock": (("clock", "Jornada escolar"),),
+        }
+        for section, tabs in groups.items():
             page = ttk.Frame(self.editor_body, style="App.TFrame")
-            self.editor_pages[key] = page
-            self.editor_content[key] = self._build_scroll_page(page)
+            self.editor_pages[section] = page
+            if len(tabs) > 1:
+                notebook = ttk.Notebook(page)
+                notebook.pack(fill=tk.BOTH, expand=True)
+                self.editor_notebooks[section] = notebook
+                notebook.bind("<<NotebookTabChanged>>", self._editor_tab_changed)
+            else:
+                notebook = None
+            for key, title in tabs:
+                tab = ttk.Frame(notebook or page, style="App.TFrame")
+                if notebook is not None:
+                    notebook.add(tab, text=title)
+                else:
+                    tab.pack(fill=tk.BOTH, expand=True)
+                self.editor_tab_pages[key] = tab
+                self.editor_content[key] = self._build_scroll_page(tab)
         self.setup_content = self.editor_content["clock"]
-        self.rules_content = self.editor_content["rules"]
+
+    def _editor_tab_changed(self, _event=None) -> None:
+        if self._editor_snapshot is None:
+            return
+        # Choosing a resource preselects it in its associated forms.
+        if self._editor_section == "teachers" and self.teacher_name_var.get() in self.teachers:
+            name = self.teacher_name_var.get()
+            self.association_teacher_var.set(name)
+            self.classroom_teacher_var.set(name)
+            self.unavailable_teacher_var.set(name)
+            self._load_association_scope()
+        elif self._editor_section == "subjects" and self.subject_name_var.get() in {
+            item[0] for item in self.subjects
+        }:
+            self.unavailable_subject_var.set(self.subject_name_var.get())
+        if self._editor_section in ("subjects", "teachers"):
+            kind = "subject" if self._editor_section == "subjects" else "teacher"
+            if self.editor_notebooks[self._editor_section].select() == str(
+                self.editor_tab_pages[f"{kind}_days"]
+            ):
+                self._load_unavailable_days(kind)
 
     def _open_editor(self, section: str) -> None:
-        if self.planning is None or self._editor_snapshot is not None:
+        if self.planning is None or self._editor_snapshot is not None or self._project_dialog_open:
             return
+        target_tab = section
+        section = {"associations": "teachers", "rules": "subjects"}.get(section, section)
         self._editor_snapshot = deepcopy(self.planning)
         self._editor_renames = []
         self._editor_schedule_week = self.week_var.get()
@@ -225,7 +289,12 @@ class CalendarApp(tk.Tk):
         for page in self.editor_pages.values():
             page.pack_forget()
         self.editor_pages[section].pack(fill=tk.BOTH, expand=True)
-        self._scroll_canvases[str(self.editor_pages[section])].yview_moveto(0)
+        if section in self.editor_notebooks:
+            notebook = self.editor_notebooks[section]
+            if notebook.tab(self.editor_tab_pages[target_tab], "state") == "disabled":
+                target_tab = section
+            notebook.select(self.editor_tab_pages[target_tab])
+        self._scroll_canvases[str(self.editor_tab_pages[target_tab])].yview_moveto(0)
         for variable in (
             self.subject_name_var,
             self.teacher_name_var,
@@ -233,6 +302,9 @@ class CalendarApp(tk.Tk):
             self.classroom_names_var,
         ):
             variable.set("")
+        self.subject_scope.set_scope(None)
+        self.subject_double_var.set(False)
+        self._load_association_scope()
         width = min(1040, max(980, self.winfo_screenwidth() - 80))
         height = min(760, self.winfo_screenheight() - 100)
         x = max(0, (self.winfo_screenwidth() - width) // 2)
@@ -304,8 +376,16 @@ class CalendarApp(tk.Tk):
         return content
 
     def _scroll_setup(self, event: tk.Event) -> None:
+        if event.widget.winfo_toplevel() not in (self, self.editor_window):
+            return
         if self._editor_snapshot is not None:
-            canvas = self._scroll_canvases.get(str(self.editor_pages[self._editor_section]))
+            notebook = self.editor_notebooks.get(self._editor_section)
+            page = (
+                notebook.select()
+                if notebook is not None
+                else str(self.editor_tab_pages[self._editor_section])
+            )
+            canvas = self._scroll_canvases.get(page)
         else:
             canvas = self._scroll_canvases.get(self.notebook.select())
         if canvas is None or isinstance(
@@ -437,98 +517,33 @@ class CalendarApp(tk.Tk):
         self.clock_tree.tag_configure("pause", background=PALE_TEAL, foreground=TEAL)
         self.clock_tree.tag_configure("gap", background="#fff4dc", foreground="#805d19")
         self._build_resource_cards()
-        parent = self.rules_content
-
-        restrictions = ttk.Frame(parent, style="Surface.TFrame", padding=20)
-        restrictions.pack(fill=tk.X, pady=(0, 12))
-        ttk.Label(
-            restrictions, text="Restricciones opcionales por día", style="Section.TLabel"
-        ).grid(row=0, column=0, columnspan=2, sticky=tk.W)
-        ttk.Label(
-            restrictions,
-            text="Selecciona una persona o asignatura y los días que no podrá utilizar.",
-            style="Muted.TLabel",
-        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(3, 8))
-        ttk.Label(restrictions, text="Profesores no disponibles", style="Muted.TLabel").grid(
-            row=2, column=0, sticky=tk.W
-        )
-        ttk.Label(restrictions, text="Asignaturas no disponibles", style="Muted.TLabel").grid(
-            row=2, column=1, sticky=tk.W
-        )
-        teacher_day_table = ttk.Frame(restrictions, style="Card.TFrame")
-        teacher_day_table.grid(row=3, column=0, sticky="nsew", padx=(0, 12))
-        self.teacher_day_tree = ttk.Treeview(
-            teacher_day_table, columns=("name", "days"), show="headings", height=3
-        )
-        self.teacher_day_tree.heading("name", text="Profesor")
-        self.teacher_day_tree.heading("days", text="Días")
-        self.teacher_day_tree.column("name", width=130)
-        self.teacher_day_tree.column("days", width=100)
-        self.teacher_day_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        teacher_day_scroll = ttk.Scrollbar(
-            teacher_day_table, orient=tk.VERTICAL, command=self.teacher_day_tree.yview
-        )
-        teacher_day_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.teacher_day_tree.configure(yscrollcommand=teacher_day_scroll.set)
-        subject_day_table = ttk.Frame(restrictions, style="Card.TFrame")
-        subject_day_table.grid(row=3, column=1, sticky="nsew")
-        self.subject_day_tree = ttk.Treeview(
-            subject_day_table, columns=("name", "days"), show="headings", height=3
-        )
-        self.subject_day_tree.heading("name", text="Asignatura")
-        self.subject_day_tree.heading("days", text="Días")
-        self.subject_day_tree.column("name", width=130)
-        self.subject_day_tree.column("days", width=100)
-        self.subject_day_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        subject_day_scroll = ttk.Scrollbar(
-            subject_day_table, orient=tk.VERTICAL, command=self.subject_day_tree.yview
-        )
-        subject_day_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.subject_day_tree.configure(yscrollcommand=subject_day_scroll.set)
-        day_form = ttk.Frame(restrictions, style="Card.TFrame")
-        day_form.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(16, 0))
-        day_form.columnconfigure(1, weight=1)
-        ttk.Label(day_form, text="Profesor", style="Muted.TLabel").grid(
-            row=0, column=0, sticky=tk.W, padx=(0, 14)
-        )
-        self.unavailable_teacher_combo = ttk.Combobox(
-            day_form, textvariable=self.unavailable_teacher_var, state="readonly", width=22
-        )
-        self.unavailable_teacher_combo.grid(row=0, column=1, sticky="ew", padx=(0, 14), pady=4)
-        ttk.Button(
-            day_form, text="Bloquear días del profesor", command=self._add_teacher_unavailable
-        ).grid(row=0, column=2, sticky="ew")
-        ttk.Label(day_form, text="Asignatura", style="Muted.TLabel").grid(
-            row=1, column=0, sticky=tk.W, padx=(0, 14)
-        )
-        self.unavailable_subject_combo = ttk.Combobox(
-            day_form, textvariable=self.unavailable_subject_var, state="readonly", width=22
-        )
-        self.unavailable_subject_combo.grid(row=1, column=1, sticky="ew", padx=(0, 14), pady=4)
-        ttk.Button(
-            day_form, text="Bloquear días de la asignatura", command=self._add_subject_unavailable
-        ).grid(row=1, column=2, sticky="ew")
-        days_form = ttk.Frame(day_form, style="Card.TFrame")
-        days_form.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(10, 6))
-        self.unavailable_day_vars = {day: tk.BooleanVar() for day in DAY_NAMES}
-        for column, (day, name) in enumerate(DAY_NAMES.items()):
-            ttk.Checkbutton(days_form, text=name, variable=self.unavailable_day_vars[day]).grid(
-                row=0, column=column, padx=(0, 12)
-            )
-        ttk.Label(
-            day_form,
-            text="Marca los días y aplica el bloqueo a un profesor o una asignatura.",
-            style="Muted.TLabel",
-        ).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
-        ttk.Button(
-            day_form,
-            text="Eliminar selección",
-            style="Danger.TButton",
-            command=self._remove_unavailable,
-        ).grid(row=3, column=2, sticky=tk.E)
+        self.unavailable_day_vars = {}
+        self.availability_editors = {}
+        self._build_unavailable_card("teacher", self.editor_content["teacher_days"])
+        self._build_unavailable_card("subject", self.editor_content["subject_days"])
+        restrictions = ttk.Frame(self.editor_content["rules"], style="Surface.TFrame", padding=20)
+        restrictions.pack(fill=tk.X, pady=(0, 14))
         self._build_subject_rule_editors(restrictions)
         restrictions.columnconfigure(0, weight=1)
         restrictions.columnconfigure(1, weight=1)
+
+    def _build_unavailable_card(self, kind: str, parent: ttk.Frame) -> None:
+        variable = getattr(self, f"unavailable_{kind}_var")
+        editor = AvailabilityEditor(parent, kind, variable, self._change_availability)
+        editor.pack(fill=tk.X, pady=(0, 14))
+        self.availability_editors[kind] = editor
+        self.unavailable_day_vars[kind] = editor.days
+        setattr(self, f"unavailable_{kind}_combo", editor.resource_combo)
+
+    def _load_unavailable_days(self, kind: str) -> None:
+        self.availability_editors[kind].focus_resource(
+            getattr(self, f"unavailable_{kind}_var").get()
+        )
+
+    def _change_availability(self, blocks) -> None:
+        if self.planning is not None:
+            self.planning = with_blocks(self.planning, blocks)
+            self._refresh_unavailable_editors()
 
     def _build_resource_cards(self) -> None:
         for key, builder in (
@@ -536,7 +551,7 @@ class CalendarApp(tk.Tk):
             ("teachers", self._build_teacher_card),
             ("classrooms", self._build_classroom_card),
             ("associations", self._build_association_card),
-            ("associations", self._build_classroom_association_card),
+            ("teacher_rooms", self._build_classroom_association_card),
         ):
             card = ttk.Frame(self.editor_content[key], style="Surface.TFrame", padding=20)
             card.pack(fill=tk.X, pady=(0, 14))
@@ -706,14 +721,14 @@ class CalendarApp(tk.Tk):
         subject_table = ttk.Frame(card, style="Card.TFrame")
         subject_table.pack(fill=tk.BOTH, expand=True)
         self.subject_tree = ttk.Treeview(
-            subject_table, columns=("name", "lessons", "double"), show="headings", height=5
+            subject_table, columns=("name", "lessons", "double"), show="headings", height=3
         )
         self.subject_tree.heading("name", text="Asignatura")
         self.subject_tree.heading("lessons", text="Por semana")
         self.subject_tree.heading("double", text="Doble")
         self.subject_tree.column("name", width=160)
         self.subject_tree.column("lessons", width=75, anchor=tk.CENTER)
-        self.subject_tree.column("double", width=60, anchor=tk.CENTER)
+        self.subject_tree.column("double", width=220, anchor=tk.W)
         self.subject_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         subject_scroll = ttk.Scrollbar(
             subject_table, orient=tk.VERTICAL, command=self.subject_tree.yview
@@ -732,6 +747,11 @@ class CalendarApp(tk.Tk):
         ttk.Checkbutton(form, text="Doble", variable=self.subject_double_var).pack(
             side=tk.LEFT, padx=(0, 6)
         )
+        self.subject_scope = ClassroomScope(card, "Aplicar turnos dobles en:")
+        self.subject_scope.pack(fill=tk.X, pady=(10, 0))
+        self.subject_scope.set_enabled(False)
+        form = ttk.Frame(card, style="Card.TFrame")
+        form.pack(fill=tk.X, pady=(10, 0))
         ttk.Button(form, text="Añadir", command=self._add_subject).pack(side=tk.LEFT)
         ttk.Button(form, text="Editar", command=self._edit_subject).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(
@@ -819,10 +839,15 @@ class CalendarApp(tk.Tk):
         association_table = ttk.Frame(card, style="Card.TFrame")
         association_table.pack(fill=tk.BOTH, expand=True)
         self.association_tree = ttk.Treeview(
-            association_table, columns=("teacher", "subject"), show="headings", height=5
+            association_table,
+            columns=("teacher", "subject", "classrooms"),
+            show="headings",
+            height=3,
         )
         self.association_tree.heading("teacher", text="Profesor")
         self.association_tree.heading("subject", text="Asignatura")
+        self.association_tree.heading("classrooms", text="Aulas / grupos")
+        self.association_tree.column("classrooms", width=260)
         self.association_tree.column("teacher", width=125)
         self.association_tree.column("subject", width=125)
         self.association_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -842,6 +867,17 @@ class CalendarApp(tk.Tk):
             form, textvariable=self.association_subject_var, state="readonly", width=15
         )
         self.association_subject_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        for combo in (self.association_teacher_combo, self.association_subject_combo):
+            combo.bind("<<ComboboxSelected>>", self._load_association_scope)
+        self.association_scope = ClassroomScope(card, "Aulas para esta pareja profesor–asignatura:")
+        self.association_scope.pack(fill=tk.X, pady=(10, 0))
+        ttk.Label(
+            card,
+            text="También se respetan las limitaciones generales de aulas del profesor.",
+            style="Muted.TLabel",
+        ).pack(anchor=tk.W, pady=(4, 0))
+        form = ttk.Frame(card, style="Card.TFrame")
+        form.pack(fill=tk.X, pady=(10, 0))
         ttk.Button(form, text="Vincular", command=self._add_association).pack(side=tk.LEFT)
         ttk.Button(form, text="Editar", command=self._edit_association).pack(
             side=tk.LEFT, padx=(6, 0)
@@ -977,7 +1013,7 @@ class CalendarApp(tk.Tk):
             self.bind(f"<Command-{key}>", lambda _event, command=command: command())
 
     def _update_file_menu(self) -> None:
-        editing = self._editor_snapshot is not None
+        editing = self._editor_snapshot is not None or self._project_dialog_open
         for label in ("Guardar", "Cargar", "Limpiar", "Reglas de generación", "Salir"):
             self.file_menu.entryconfigure(label, state="disabled" if editing else "normal")
         self.export_button.configure(
@@ -985,7 +1021,7 @@ class CalendarApp(tk.Tk):
         )
 
     def _show_rules(self) -> None:
-        if self._editor_snapshot is not None:
+        if self._editor_snapshot is not None or self._project_dialog_open:
             return
         if self.rules_window is None or not self.rules_window.winfo_exists():
             self.rules_window = RulesHelp(self)
@@ -1021,14 +1057,24 @@ class CalendarApp(tk.Tk):
                     self.selected_subject = rename.after
         self.schedule = updated
 
+    def _choose_project_path(self, *, save: bool) -> str | None:
+        self._project_dialog_open = True
+        self._update_file_menu()
+        try:
+            return ask_project_path(
+                self,
+                save=save,
+                initial_path=self.document_path,
+                has_schedule=self.schedule is not None,
+            )
+        finally:
+            self._project_dialog_open = False
+            self._update_file_menu()
+
     def _open(self) -> None:
-        if self._editor_snapshot is not None:
+        if self._editor_snapshot is not None or self._project_dialog_open:
             return
-        path = filedialog.askopenfilename(
-            title="Cargar",
-            filetypes=(("Scholar Calendar", "*.json"), ("Todos los archivos", "*.*")),
-            parent=self,
-        )
+        path = self._choose_project_path(save=False)
         if path:
             self._load(Path(path))
 
@@ -1062,7 +1108,7 @@ class CalendarApp(tk.Tk):
         )
 
     def _clear_project(self) -> None:
-        if self._editor_snapshot is not None:
+        if self._editor_snapshot is not None or self._project_dialog_open:
             return
         self.schedule = None
         self.schedule_planning = None
@@ -1099,11 +1145,14 @@ class CalendarApp(tk.Tk):
             variable.set("")
         self.subject_lessons_var.set(1)
         self.subject_double_var.set(False)
-        for variable in self.unavailable_day_vars.values():
-            variable.set(False)
+        self.subject_scope.set_scope(None)
+        self.association_scope.set_scope(None)
+        for days in self.unavailable_day_vars.values():
+            for variable in days.values():
+                variable.set(False)
 
     def _exit(self) -> None:
-        if self._editor_snapshot is None:
+        if self._editor_snapshot is None and not self._project_dialog_open:
             self.destroy()
 
     def _set_planning(self, planning: PlanningInput) -> None:
@@ -1118,6 +1167,11 @@ class CalendarApp(tk.Tk):
             (subject.name, subject.lessons_per_cycle, subject.double_period)
             for subject in planning.subjects
         ]
+        self.subject_double_classrooms = {
+            subject.name: subject.double_classrooms
+            for subject in planning.subjects
+            if subject.double_classrooms is not None
+        }
         self.teachers = [teacher.name for teacher in planning.teachers]
         self.teacher_subjects = {
             name: set(subjects) for name, subjects in planning.teacher_subjects.items()
@@ -1125,6 +1179,7 @@ class CalendarApp(tk.Tk):
         self.teacher_classrooms = {
             name: set(classrooms) for name, classrooms in planning.teacher_classrooms.items()
         }
+        self.teacher_subject_classrooms = deepcopy(planning.teacher_subject_classrooms)
         self.class_start_var.set(planning.class_start.strftime("%H:%M"))
         self.period_duration_var.set(planning.period_duration_minutes)
         self.transition_var.set(planning.transition_minutes)
@@ -1283,7 +1338,8 @@ class CalendarApp(tk.Tk):
         planning = PlanningInput(
             weeks=weeks,
             subjects=tuple(
-                Subject(name, lessons, double) for name, lessons, double in self.subjects
+                Subject(name, lessons, double, self.subject_double_classrooms.get(name))
+                for name, lessons, double in self.subjects
             ),
             teachers=tuple(Teacher(name) for name in self.teachers),
             classrooms=classrooms,
@@ -1301,6 +1357,8 @@ class CalendarApp(tk.Tk):
                 for teacher in self.teachers
             },
             teacher_classrooms=teacher_classrooms,
+            teacher_subject_classrooms=deepcopy(self.teacher_subject_classrooms),
+            availability_blocks=self.planning.availability_blocks,
             forbidden_consecutive=self.planning.forbidden_consecutive,
             forbidden_parallel=self.planning.forbidden_parallel,
             course_name=self.course_var.get().strip(),
@@ -1321,20 +1379,14 @@ class CalendarApp(tk.Tk):
         return planning
 
     def _save(self) -> None:
-        if self._editor_snapshot is not None:
+        if self._editor_snapshot is not None or self._project_dialog_open:
             return
         try:
             planning = self._sync_planning()
         except (TypeError, ValueError, tk.TclError) as error:
             messagebox.showerror("Configuración incompleta", str(error), parent=self)
             return
-        path = filedialog.asksaveasfilename(
-            title="Guardar",
-            defaultextension=".json",
-            initialfile=self.document_path.name if self.document_path else "centro.json",
-            filetypes=(("Scholar Calendar", "*.json"),),
-            parent=self,
-        )
+        path = self._choose_project_path(save=True)
         if path:
             try:
                 self._update_schedule_metadata(planning)
@@ -1384,7 +1436,15 @@ class CalendarApp(tk.Tk):
             self.status_var.set(
                 "No se pudo generar el horario. Revisa la configuración y las restricciones."
             )
-            messagebox.showerror("No se pudo generar el horario", str(error))
+            if isinstance(error, ScheduleError) and error.conflicts:
+                self.generation_error_window = GenerationFailure(
+                    self,
+                    error.summary,
+                    error.conflicts,
+                    lambda: self.notebook.select(self.setup_tab),
+                )
+            else:
+                messagebox.showerror("No se pudo generar el horario", str(error), parent=self)
 
     def _add_subject(self) -> None:
         name = self.subject_name_var.get().strip()
@@ -1393,16 +1453,26 @@ class CalendarApp(tk.Tk):
             if lessons is None:
                 return
             self.subjects.append((name, lessons, self.subject_double_var.get()))
+            self._store_subject_scope(name)
             self.subject_name_var.set("")
             self._refresh_editors()
 
     def _select_subject(self, _event: tk.Event) -> None:
         selected = self.subject_tree.selection()
         if selected:
-            name, lessons, double = self.subject_tree.item(selected[0], "values")
+            name, lessons, _double = self.subject_tree.item(selected[0], "values")
             self.subject_name_var.set(name)
             self.subject_lessons_var.set(int(lessons))
-            self.subject_double_var.set(double == "Sí")
+            self.subject_double_var.set(
+                next(double for item, _, double in self.subjects if item == name)
+            )
+            self.subject_scope.set_scope(self.subject_double_classrooms.get(name))
+
+    def _store_subject_scope(self, name: str) -> None:
+        scope = self.subject_scope.get_scope()
+        self.subject_double_classrooms.pop(name, None)
+        if self.subject_double_var.get() and scope is not None:
+            self.subject_double_classrooms[name] = scope
 
     def _edit_subject(self) -> None:
         selected = self.subject_tree.selection()
@@ -1430,6 +1500,8 @@ class CalendarApp(tk.Tk):
                 subjects.remove(old_name)
                 subjects.add(new_name)
         self._update_resource_rules("subject", old_name, new_name)
+        self._update_scoped_resources("subject", old_name, new_name)
+        self._store_subject_scope(new_name)
         self._editor_renames.append(ResourceRename("subject", old_name, new_name))
         self.subject_name_var.set("")
         self._refresh_editors()
@@ -1442,6 +1514,7 @@ class CalendarApp(tk.Tk):
             for subjects in self.teacher_subjects.values():
                 subjects.discard(name)
             self._update_resource_rules("subject", name, None)
+            self._update_scoped_resources("subject", name, None)
             self._refresh_editors()
 
     def _add_teacher(self) -> None:
@@ -1470,6 +1543,7 @@ class CalendarApp(tk.Tk):
         self.teacher_subjects[new_name] = self.teacher_subjects.pop(old_name, set())
         self.teacher_classrooms[new_name] = self.teacher_classrooms.pop(old_name, set())
         self._update_resource_rules("teacher", old_name, new_name)
+        self._update_scoped_resources("teacher", old_name, new_name)
         self._editor_renames.append(ResourceRename("teacher", old_name, new_name))
         self.teacher_name_var.set("")
         self._refresh_editors()
@@ -1499,6 +1573,8 @@ class CalendarApp(tk.Tk):
         self.classroom_list.delete(index)
         self.classroom_list.insert(index, new_name)
         self._editor_renames.append(ResourceRename("classroom", old_name, new_name))
+        self._update_resource_rules("classroom", old_name, new_name)
+        self._update_scoped_resources("classroom", old_name, new_name)
         for classrooms in self.teacher_classrooms.values():
             if old_name in classrooms:
                 classrooms.remove(old_name)
@@ -1511,6 +1587,8 @@ class CalendarApp(tk.Tk):
         if selected:
             name = self.classroom_list.get(selected[0])
             self.classroom_list.delete(selected[0])
+            self._update_resource_rules("classroom", name, None)
+            self._update_scoped_resources("classroom", name, None)
             for classrooms in self.teacher_classrooms.values():
                 classrooms.discard(name)
             self._refresh_editors()
@@ -1523,6 +1601,7 @@ class CalendarApp(tk.Tk):
             self.teacher_subjects.pop(name, None)
             self.teacher_classrooms.pop(name, None)
             self._update_resource_rules("teacher", name, None)
+            self._update_scoped_resources("teacher", name, None)
             self._refresh_editors()
 
     def _add_association(self) -> None:
@@ -1530,14 +1609,54 @@ class CalendarApp(tk.Tk):
         subject = self.association_subject_var.get()
         if teacher and subject:
             self.teacher_subjects.setdefault(teacher, set()).add(subject)
+            self._store_association_scope(teacher, subject)
             self._refresh_editors()
+
+    def _store_association_scope(self, teacher: str, subject: str) -> None:
+        scope = self.association_scope.get_scope()
+        self.teacher_subject_classrooms.get(teacher, {}).pop(subject, None)
+        if scope is not None:
+            self.teacher_subject_classrooms.setdefault(teacher, {})[subject] = scope
+
+    def _load_association_scope(self, _event=None) -> None:
+        self.association_scope.set_scope(
+            self.teacher_subject_classrooms.get(self.association_teacher_var.get(), {}).get(
+                self.association_subject_var.get()
+            )
+        )
+
+    def _update_scoped_resources(self, kind: str, old: str, new: str | None) -> None:
+        def rename_key(mapping):
+            if old in mapping:
+                value = mapping.pop(old)
+                if new is not None:
+                    mapping[new] = value
+
+        if kind == "teacher":
+            rename_key(self.teacher_subject_classrooms)
+        elif kind == "subject":
+            rename_key(self.subject_double_classrooms)
+            for subjects in self.teacher_subject_classrooms.values():
+                rename_key(subjects)
+        else:
+            for scopes in (
+                self.subject_double_classrooms,
+                *self.teacher_subject_classrooms.values(),
+            ):
+                for key, rooms in scopes.items():
+                    scopes[key] = frozenset(
+                        new if room == old else room
+                        for room in rooms
+                        if room != old or new is not None
+                    )
 
     def _select_association(self, _event: tk.Event) -> None:
         selected = self.association_tree.selection()
         if selected:
-            teacher, subject = self.association_tree.item(selected[0], "values")
+            teacher, subject, _rooms = self.association_tree.item(selected[0], "values")
             self.association_teacher_var.set(teacher)
             self.association_subject_var.set(subject)
+            self._load_association_scope()
 
     def _edit_association(self) -> None:
         selected = self.association_tree.selection()
@@ -1545,23 +1664,66 @@ class CalendarApp(tk.Tk):
         subject = self.association_subject_var.get()
         if not selected or not teacher or not subject:
             return
-        old_teacher, old_subject = self.association_tree.item(selected[0], "values")
+        old_teacher, old_subject, _rooms = self.association_tree.item(selected[0], "values")
+        if (teacher, subject) != (
+            old_teacher,
+            old_subject,
+        ) and subject in self.teacher_subjects.get(teacher, ()):
+            messagebox.showinfo(
+                "Asociación existente",
+                "Selecciona esa asociación para editar sus aulas.",
+                parent=self.editor_window,
+            )
+            return
+        if self.planning is not None:
+            self.planning = replace(
+                self.planning,
+                availability_blocks=frozenset(
+                    replace(block, teacher=teacher, subject=subject)
+                    if (block.teacher, block.subject) == (old_teacher, old_subject)
+                    else block
+                    for block in self.planning.availability_blocks
+                ),
+            )
         self.teacher_subjects.get(old_teacher, set()).discard(old_subject)
+        self.teacher_subject_classrooms.get(old_teacher, {}).pop(old_subject, None)
         self.teacher_subjects.setdefault(teacher, set()).add(subject)
+        self._store_association_scope(teacher, subject)
         self._refresh_editors()
 
     def _remove_association(self) -> None:
         selected = self.association_tree.selection()
         if selected:
-            teacher, subject = self.association_tree.item(selected[0], "values")
+            teacher, subject, _rooms = self.association_tree.item(selected[0], "values")
+            if self.planning is not None:
+                self.planning = replace(
+                    self.planning,
+                    availability_blocks=frozenset(
+                        block
+                        for block in self.planning.availability_blocks
+                        if (block.teacher, block.subject) != (teacher, subject)
+                    ),
+                )
             self.teacher_subjects.get(teacher, set()).discard(subject)
+            self.teacher_subject_classrooms.get(teacher, {}).pop(subject, None)
             self._refresh_editors()
 
     def _refresh_editors(self) -> None:
+        rooms = self.classroom_list.get(0, tk.END)
+        self.subject_scope.set_rooms(rooms)
+        self.association_scope.set_rooms(rooms)
         for item in self.subject_tree.get_children():
             self.subject_tree.delete(item)
         for name, lessons, double in self.subjects:
-            self.subject_tree.insert("", tk.END, values=(name, lessons, "Sí" if double else "No"))
+            self.subject_tree.insert(
+                "",
+                tk.END,
+                values=(
+                    name,
+                    lessons,
+                    scope_description(self.subject_double_classrooms.get(name)) if double else "No",
+                ),
+            )
         self.teacher_list.delete(0, tk.END)
         for teacher in self.teachers:
             self.teacher_list.insert(tk.END, teacher)
@@ -1569,7 +1731,10 @@ class CalendarApp(tk.Tk):
             self.association_tree.delete(item)
         for teacher in self.teachers:
             for subject in sorted(self.teacher_subjects.get(teacher, set())):
-                self.association_tree.insert("", tk.END, values=(teacher, subject))
+                scope = self.teacher_subject_classrooms.get(teacher, {}).get(subject)
+                self.association_tree.insert(
+                    "", tk.END, values=(teacher, subject, scope_description(scope))
+                )
         subjects = [subject[0] for subject in self.subjects]
         self.association_subject_combo["values"] = subjects
         self.association_teacher_combo["values"] = self.teachers
@@ -1605,6 +1770,18 @@ class CalendarApp(tk.Tk):
             self.classroom_teacher_var.set(self.teachers[0])
         self._refresh_subject_rule_editors()
         self._refresh_unavailable_editors()
+        for section, key, enabled in (
+            ("subjects", "subject_days", bool(self.subjects)),
+            ("subjects", "rules", len(self.subjects) >= 2),
+            ("teachers", "teacher_days", bool(self.teachers)),
+            ("teachers", "teacher_rooms", bool(self.teachers and rooms)),
+            ("teachers", "associations", bool(self.teachers and self.subjects and rooms)),
+        ):
+            notebook = self.editor_notebooks[section]
+            page = self.editor_tab_pages[key]
+            if not enabled and notebook.select() == str(page):
+                notebook.select(self.editor_tab_pages[section])
+            notebook.tab(page, state="normal" if enabled else "disabled")
 
     def _read_subject_frequency(self) -> int | None:
         try:
@@ -1632,12 +1809,20 @@ class CalendarApp(tk.Tk):
         """Keep name-based restrictions attached to renamed resources and remove orphan rules."""
         if self.planning is None:
             return
-        field = f"{kind}_unavailable_days"
-        days = dict(getattr(self.planning, field) or {})
-        blocked = days.pop(previous, None)
-        if name is not None and blocked is not None:
-            days[name] = blocked
-        changes = {field: days}
+        changes = {
+            "availability_blocks": frozenset(
+                replace(block, **{kind: name}) if getattr(block, kind) == previous else block
+                for block in self.planning.availability_blocks
+                if name is not None or getattr(block, kind) != previous
+            ),
+        }
+        if kind in ("teacher", "subject"):
+            field = f"{kind}_unavailable_days"
+            days = dict(getattr(self.planning, field) or {})
+            blocked = days.pop(previous, None)
+            if name is not None and blocked is not None:
+                days[name] = blocked
+            changes[field] = days
         if kind == "subject":
             for field in ("forbidden_consecutive", "forbidden_parallel"):
                 changes[field] = frozenset(
@@ -1699,85 +1884,24 @@ class CalendarApp(tk.Tk):
             self.classroom_names_var.set(classrooms)
 
     def _refresh_unavailable_editors(self) -> None:
-        for tree, rules in (
-            (
-                self.teacher_day_tree,
-                self.planning.teacher_unavailable_days if self.planning else {},
-            ),
-            (
-                self.subject_day_tree,
-                self.planning.subject_unavailable_days if self.planning else {},
-            ),
-        ):
-            tree.delete(*tree.get_children())
-            for name, days in sorted((rules or {}).items()):
-                tree.insert(
-                    "", tk.END, values=(name, ", ".join(DAY_NAMES[day] for day in sorted(days)))
-                )
-
-    def _read_days(self) -> frozenset[int]:
-        days = frozenset(
-            day for day, variable in self.unavailable_day_vars.items() if variable.get()
-        )
-        if not days:
-            raise ValueError("Marca al menos un día para aplicar el bloqueo.")
-        return days
-
-    def _add_teacher_unavailable(self) -> None:
-        try:
-            name = self.unavailable_teacher_var.get()
-            if name:
-                rules = dict(self.planning.teacher_unavailable_days or {}) if self.planning else {}
-                rules[name] = self._read_days()
-                self.planning = self._planning_with_restrictions(
-                    rules, self.planning.subject_unavailable_days if self.planning else {}
-                )
-                self._refresh_unavailable_editors()
-        except ValueError as error:
-            messagebox.showerror("Días inválidos", str(error))
-
-    def _add_subject_unavailable(self) -> None:
-        try:
-            name = self.unavailable_subject_var.get()
-            if name:
-                rules = dict(self.planning.subject_unavailable_days or {}) if self.planning else {}
-                rules[name] = self._read_days()
-                self.planning = self._planning_with_restrictions(
-                    self.planning.teacher_unavailable_days if self.planning else {}, rules
-                )
-                self._refresh_unavailable_editors()
-        except ValueError as error:
-            messagebox.showerror("Días inválidos", str(error))
-
-    def _remove_unavailable(self) -> None:
-        selected_teacher = self.teacher_day_tree.selection()
-        selected_subject = self.subject_day_tree.selection()
-        if selected_teacher and self.planning:
-            name = self.teacher_day_tree.item(selected_teacher[0], "values")[0]
-            rules = dict(self.planning.teacher_unavailable_days or {})
-            rules.pop(name, None)
-            self.planning = self._planning_with_restrictions(
-                rules, self.planning.subject_unavailable_days or {}
-            )
-        elif selected_subject and self.planning:
-            name = self.subject_day_tree.item(selected_subject[0], "values")[0]
-            rules = dict(self.planning.subject_unavailable_days or {})
-            rules.pop(name, None)
-            self.planning = self._planning_with_restrictions(
-                self.planning.teacher_unavailable_days or {}, rules
-            )
-        self._refresh_unavailable_editors()
-
-    def _planning_with_restrictions(
-        self, teacher_rules: dict[str, frozenset[int]], subject_rules: dict[str, frozenset[int]]
-    ) -> PlanningInput:
         if self.planning is None:
-            return self._blank_planning()
-        return replace(
+            return
+        planning = replace(
             self.planning,
-            teacher_unavailable_days=teacher_rules,
-            subject_unavailable_days=subject_rules,
+            classrooms=tuple(Classroom(name) for name in self.classroom_list.get(0, tk.END)),
+            teachers=tuple(Teacher(name) for name in self.teachers),
+            subjects=tuple(
+                Subject(name, lessons, double) for name, lessons, double in self.subjects
+            ),
+            teacher_subjects={
+                name: frozenset(subjects) for name, subjects in self.teacher_subjects.items()
+            },
         )
+        for editor in self.availability_editors.values():
+            editor.show(planning)
+
+    def _add_unavailable(self, kind: str) -> None:
+        self.availability_editors[kind].add()
 
     def _select_schedule_subject(self, subject: str | None) -> None:
         self.selected_subject = subject

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import time
 from itertools import pairwise
 
@@ -15,6 +15,13 @@ class Subject:
     # Historical attribute name; this value is the weekly frequency per classroom.
     lessons_per_cycle: int
     double_period: bool = False
+    # None applies doubles everywhere; an explicit set limits them to those rooms.
+    double_classrooms: frozenset[str] | None = None
+
+    def is_double_in(self, classroom: str) -> bool:
+        return self.double_period and (
+            self.double_classrooms is None or classroom in self.double_classrooms
+        )
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,17 @@ class PlanningSlot:
     period: int
     start: time
     end: time
+
+
+@dataclass(frozen=True)
+class AvailabilityBlock:
+    """Recurring unavailability; None period/classroom means the entire day/all rooms."""
+
+    day: int
+    period: int | None = None
+    teacher: str | None = None
+    subject: str | None = None
+    classroom: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +80,17 @@ class PlanningInput:
     teacher_unavailable_days: dict[str, frozenset[int]] | None = None
     subject_unavailable_days: dict[str, frozenset[int]] | None = None
     class_start: time = DEFAULT_CLASS_START
+    teacher_subject_classrooms: dict[str, dict[str, frozenset[str]]] = field(default_factory=dict)
+    availability_blocks: frozenset[AvailabilityBlock] = frozenset()
+
+    def teacher_can_teach(self, teacher: str, subject: str, classroom: str) -> bool:
+        general = self.teacher_classrooms.get(teacher)
+        specific = self.teacher_subject_classrooms.get(teacher, {}).get(subject)
+        return (
+            subject in self.teacher_subjects.get(teacher, ())
+            and (not general or classroom in general)
+            and (specific is None or classroom in specific)
+        )
 
 
 def build_slots(

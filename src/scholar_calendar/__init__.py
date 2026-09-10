@@ -1,6 +1,7 @@
 """School calendar planning domain and solver."""
 
 from .models import (
+    AvailabilityBlock,
     Classroom,
     PlanningInput,
     PlanningSlot,
@@ -11,6 +12,7 @@ from .models import (
 from .solver import Schedule, ScheduleError, solve
 
 __all__ = [
+    "AvailabilityBlock",
     "Classroom",
     "PlanningInput",
     "PlanningSlot",
